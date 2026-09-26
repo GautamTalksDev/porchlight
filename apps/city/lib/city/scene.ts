@@ -113,6 +113,7 @@ export class PorchlightCity {
   private readonly houses = new Map<string, HouseSlot>();
   private readonly hitboxes: THREE.Mesh[] = [];
   private readonly travellers: Traveller[] = [];
+  private readonly buddyArcs: THREE.Line[] = [];
   private rain?: THREE.LineSegments;
   /** Signs and clock faces that run on grid power and go dark with the storm. */
   private readonly gridLights: { mat: THREE.MeshBasicMaterial; base: THREE.Color; x: number }[] = [];
@@ -623,6 +624,46 @@ export class PorchlightCity {
 
   setCityLink(online: boolean): void {
     this.cityLinkOnline = online;
+  }
+
+  /**
+   * Glowing amber dashed arcs from buddy homes to a calling home while the call is still
+   * in the buddies window. Cleared when the tier changes or the call is answered.
+   */
+  setBuddyArcs(links: { from: string; to: string }[]): void {
+    for (const line of this.buddyArcs) {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    }
+    this.buddyArcs.length = 0;
+    const seen = new Set<string>();
+    for (const link of links) {
+      const key = `${link.from}>${link.to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const a = this.houses.get(link.from);
+      const b = this.houses.get(link.to);
+      if (!a || !b) continue;
+      const start = a.position.clone().add(new THREE.Vector3(0, 6, 0));
+      const end = b.position.clone().add(new THREE.Vector3(0, 6, 0));
+      const mid = start.clone().lerp(end, 0.5).add(new THREE.Vector3(0, 14 + start.distanceTo(end) * 0.2, 0));
+      const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+      const pts = curve.getPoints(this.reducedMotion ? 8 : 28);
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const mat = new THREE.LineDashedMaterial({
+        color: "#f2b35e",
+        dashSize: this.reducedMotion ? 100 : 2.2,
+        gapSize: this.reducedMotion ? 0 : 1.4,
+        transparent: true,
+        opacity: this.reducedMotion ? 0.55 : 0.9,
+        linewidth: 1,
+      });
+      const line = new THREE.Line(geo, mat);
+      line.computeLineDistances();
+      this.scene.add(line);
+      this.buddyArcs.push(line);
+    }
   }
 
   /** A message hopping between two households' nodes. */

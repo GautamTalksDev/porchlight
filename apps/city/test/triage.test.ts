@@ -91,3 +91,14 @@ describe("fall triage", () => {
     assert.equal(isFall("other"), false);
   });
 });
+
+describe("Porch Circles triage", () => {
+  it("ranks a city tier above an otherwise identical buddies tier", () => {
+    const pair: TriageCase[] = [
+      { ref: "R1", status: "open", waitMinutes: 12, witnesses: 1, needs: [], lang: "en", tier: "buddies" },
+      { ref: "R2", status: "open", waitMinutes: 12, witnesses: 1, needs: [], lang: "en", tier: "city" },
+    ];
+    assert.equal(ruleRanking(pair)[0]!.ref, "R2");
+    assert.match(ruleRanking(pair)[0]!.reason, /^no neighbour has answered in 12 min/);
+  });
+});

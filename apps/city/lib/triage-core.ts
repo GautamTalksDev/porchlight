@@ -4,6 +4,7 @@
  * Pure functions, unit tested in test/triage.test.ts.
  */
 import { z } from "zod";
+import type { EscalationTier } from "@porchlight/protocol";
 
 export interface TriageCase {
   ref: string;
@@ -14,6 +15,10 @@ export interface TriageCase {
   lang: "en" | "fr";
   note?: string;
   fall?: boolean;
+  /** Porch Circles escalation tier for open calls. */
+  tier?: EscalationTier | null;
+  /** Short summary of neighbour replies for Gemini (already sanitised). */
+  neighbourReplies?: string;
 }
 
 export const Action = z.enum(["dispatch_neighbour", "voice_check_in", "monitor"]);
@@ -36,7 +41,8 @@ export function ruleScore(c: TriageCase): number {
   const corroboration = c.witnesses > 1 ? 5 : 0;
   const unanswered = c.status === "open" ? 20 : 0;
   const fall = c.fall ? 25 : 0;
-  return needs + wait + corroboration + unanswered + fall;
+  const tierBoost = c.tier === "city" ? 15 : c.tier === "street" ? 5 : 0;
+  return needs + wait + corroboration + unanswered + fall + tierBoost;
 }
 
 export function ruleRanking(cases: TriageCase[]): RankedItem[] {
@@ -47,10 +53,11 @@ export function ruleRanking(cases: TriageCase[]): RankedItem[] {
       const powerDependent = c.needs.some((n) => n.weight >= 40);
       const priority = s >= 70 ? 1 : s >= 50 ? 2 : s >= 35 ? 3 : s >= 20 ? 4 : 5;
       const parts: string[] = [];
+      if (c.tier === "city") parts.push(`no neighbour has answered in ${c.waitMinutes} min`);
       if (c.fall) parts.push("possible fall, no button pressed");
       if (powerDependent) parts.push("depends on power for medical equipment");
-      if (c.status === "open") parts.push("no neighbour has responded");
-      parts.push(`waiting ${c.waitMinutes} min`);
+      if (c.status === "open" && c.tier !== "city") parts.push("no neighbour has responded");
+      if (c.tier !== "city") parts.push(`waiting ${c.waitMinutes} min`);
       return {
         ref: c.ref,
         priority,

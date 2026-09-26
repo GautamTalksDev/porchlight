@@ -1,16 +1,19 @@
 import "server-only";
 import {
   EventStore,
+  REPLY_LABELS,
   compareHlc,
   createEvent,
   decodeHlc,
+  escalationTier,
   project,
-  verifyEvent,
   type SignedEvent,
 } from "@porchlight/protocol";
 import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
+import { buildNeighbourThread, circleWindows } from "./circles";
 import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
+import { classifyIngestItem } from "./ingest-verify";
 import { NEED_LABELS, registry } from "./registry";
 import { computeSilent } from "./silence";
 
@@ -113,17 +116,16 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
   const result: IngestResult = { accepted: [], duplicates: [], rejected: [], cityEvents: [] };
   const fresh: SignedEvent[] = [];
   for (const item of raw) {
-    const id = String((item as { id?: unknown })?.id ?? "").slice(0, 64);
-    if (c.store.has(id)) {
-      result.duplicates.push(id);
+    const verdict = classifyIngestItem(item, (id) => c.store.has(id));
+    if (verdict.status === "duplicate") {
+      result.duplicates.push(verdict.id);
       continue;
     }
-    const v = verifyEvent(item);
-    if (!v.ok) {
-      result.rejected.push({ id, reason: v.reason });
+    if (verdict.status === "rejected") {
+      result.rejected.push({ id: verdict.id, reason: verdict.reason });
       continue;
     }
-    fresh.push(v.event);
+    fresh.push(verdict.event);
   }
   // Several nodes often deliver the same event at the same moment. The database decides who was
   // first (ON CONFLICT DO NOTHING); every other copy counts as a duplicate, not a delivery.
@@ -235,12 +237,28 @@ export async function snapshot() {
       openIncident: s?.openIncident ?? null,
     };
   });
-  const incidents = p.incidents.map((i) => ({
-    ...i,
-    label: reg.households[i.household]?.label ?? i.household,
-    openedAtMs: decodeHlc(i.openedAt).wall,
-    waitMinutes: Math.max(0, Math.round((now - decodeHlc(i.openedAt).wall) / 60000)),
-  }));
+  const { buddyWindowSec, streetWindowSec } = circleWindows();
+  const labelOf = (id: string) => reg.households[id]?.label ?? id;
+  const incidents = p.incidents.map((i) => {
+    const openedAtMs = decodeHlc(i.openedAt).wall;
+    const buddyIds = (reg.households[i.household]?.buddies ?? []).filter((id) => reg.households[id]);
+    const tier = escalationTier({
+      incidentOpenedAt: openedAtMs,
+      acked: i.status !== "open",
+      now,
+      buddyWindowSec,
+      streetWindowSec,
+    });
+    return {
+      ...i,
+      label: labelOf(i.household),
+      openedAtMs,
+      waitMinutes: Math.max(0, Math.round((now - openedAtMs) / 60000)),
+      tier,
+      buddies: buddyIds.map((id) => ({ id, label: labelOf(id) })),
+      neighbourThread: buildNeighbourThread(i.replies, labelOf),
+    };
+  });
   let tl: { source: string; buckets: TimelineBucket[] };
   let hold = { p50: 0, p95: 0, max: 0, n: 0 };
   if (dbEnabled()) {
@@ -271,6 +289,11 @@ export async function snapshot() {
   const trail: Record<string, { id: string; kind: string; at: number; by: string; via: string | null; source: string; beacon: string | null; note: string | null }[]> = {};
   for (const e of events) {
     const list = (trail[e.household] ??= []);
+    let note: string | null = e.note ?? null;
+    if (e.kind === "reply" && e.reply) {
+      const label = REPLY_LABELS[e.reply];
+      note = e.note ? `${label}. ${e.note}` : label;
+    }
     list.push({
       id: e.id.slice(0, 10),
       kind: e.kind,
@@ -279,7 +302,7 @@ export async function snapshot() {
       via: c.deliveredBy.get(e.id) ?? null,
       source: e.source.type,
       beacon: e.source.beacon ?? null,
-      note: e.note ?? null,
+      note,
     });
   }
   for (const k of Object.keys(trail)) trail[k] = trail[k]!.sort((a, b) => b.at - a.at).slice(0, 8);

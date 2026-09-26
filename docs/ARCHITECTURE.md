@@ -128,11 +128,12 @@ flowchart TB
 * **The city signs its own actions.** When a coordinator or the voice agent marks someone safe, that becomes an Ed25519 signed event from the city's identity, stored like any other. Every change is attributable.
 * **The city acts like another neighbour for its own decisions.** Each ingest reply includes recent city-signed events. Nodes verify them, keep them, and gossip them onward, so a dispatch or mark-safe made in the operations room clears the same call on every node console.
 * **Silence is a signal.** When a coordinator declares an emergency, the city watches vulnerable homes (those with recorded needs) that send no event for a configurable stretch of time. The people who need help most are often the ones who never call, so the operations room can check in or send someone before a beacon is pressed.
+* **Porch Circles in the city.** The city reads the same `BUDDY_WINDOW_SEC` and `STREET_WINDOW_SEC` as the nodes. For every open incident it computes the escalation tier, lists the registered buddies, and builds the neighbour reply thread. Triage scores a "city" tier higher (+15) than "street" (+5) or "buddies", and the operations room shows chips, the Neighbours panel, trust-trail labels, and amber buddy arcs in the 3D view while a call is still in the buddies window. Signed `reply` events are accepted at ingest; Tiger Data's kind check includes `reply`.
 * **Analytics come from TimescaleDB.** The last hour timeline reads a continuous aggregate (`events_per_minute`) with real-time blending. On plain PostgreSQL the same numbers are computed on the fly.
 
 ## The data model
 
-Everything is an event. There are four kinds.
+Everything is an event. There are five kinds.
 
 | Kind | Meaning | Created by |
 | - | - | - |
@@ -140,6 +141,7 @@ Everything is an event. There are four kinds.
 | `ok` | This household is safe. Resolves any open incident there | A node (long press or console), or the city |
 | `ack` | Someone is on the way. Points at the `help` event it answers | A node console, or the city |
 | `note` | Free text about a household, 280 characters at most | A node console |
+| `reply` | A neighbour's Porch Circles quick reply (`omw`, `cant`, `generator`, `blocked`) | A node on the street |
 
 State is a **projection**: a pure function from the set of events to incidents and household statuses. There is no mutable state to fall out of sync.
 

@@ -137,7 +137,11 @@ export function useCopilot(opts: {
             const live = optsRef.current.liveRef.current;
             const text = buildOverview({
               counts: live.counts,
-              queue: (live.triage?.items ?? []).map((i) => ({ label: i.label, needs: i.needs })),
+              queue: (live.triage?.items ?? []).map((i) => ({
+                label: i.label,
+                needs: i.needs,
+                noNeighbour: i.tier === "city",
+              })),
               silent: (live.snap?.silent ?? []).map((h) => ({
                 label: h.label,
                 minutesSilent: h.minutesSilent,
@@ -168,6 +172,24 @@ export function useCopilot(opts: {
             let wait = "";
             if (open) wait = ` Waiting ${open.waitMinutes} minutes.`;
             else if (silent) wait = ` Silent for ${silent.minutesSilent} minutes.`;
+            let circles = "";
+            if (open) {
+              const tierWords: Record<string, string> = {
+                buddies: "buddies alerted",
+                street: "street alerted",
+                city: "no neighbour has answered yet",
+              };
+              if (open.tier) circles += ` Escalation: ${tierWords[open.tier] ?? open.tier}.`;
+              if (open.buddies?.length) {
+                circles += ` Buddies: ${open.buddies.map((b) => b.label).join(", ")}.`;
+              }
+              const latest = (open.neighbourThread ?? []).slice(-2);
+              if (latest.length) {
+                circles += ` Latest replies: ${latest.map((r) => `${r.actorLabel} said ${r.replyLabel}`).join("; ")}.`;
+              } else {
+                circles += " No neighbour replies yet.";
+              }
+            }
             const trail = live.snap?.trail[hit.id]?.[0];
             let how = "";
             if (trail) {
@@ -175,7 +197,7 @@ export function useCopilot(opts: {
                 ? ` Latest event signed by ${trail.by}, relayed by ${trail.via}.`
                 : ` Latest event signed by ${trail.by}.`;
             }
-            const reply = `${hit.label} is ${statusWords[h.status] ?? h.status}. Speaks ${lang}. Needs: ${needs}.${wait}${how}`;
+            const reply = `${hit.label} is ${statusWords[h.status] ?? h.status}. Speaks ${lang}. Needs: ${needs}.${wait}${circles}${how}`;
             return tool(`Look up ${hit.label}`, reply);
           },
           dispatch: async (p: { address?: string }) => {

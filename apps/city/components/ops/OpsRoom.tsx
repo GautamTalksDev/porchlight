@@ -15,6 +15,11 @@ import type { CopilotLive } from "./useCopilot";
 const STATUS_TEXT: Record<string, string> = { unknown: "Not heard from", ok: "Safe", help: "Needs help", acknowledged: "Help on the way" };
 const ACTION_TEXT: Record<string, string> = { dispatch_neighbour: "Suggested: dispatch now", voice_check_in: "Suggested: call first", monitor: "Suggested: keep watching" };
 const KIND_TEXT: Record<string, string> = { help: "Call for help", ok: "Marked safe", ack: "Help on the way", note: "Note" };
+const TIER_CHIP: Record<string, { text: string; className: string }> = {
+  buddies: { text: "Buddies alerted", className: "tag tag-tier-buddies" },
+  street: { text: "Street alerted", className: "tag tag-tier-street" },
+  city: { text: "No neighbour yet", className: "tag tag-tier-city" },
+};
 
 async function post(path: string, body: unknown) {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -150,6 +155,18 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     city.setCityLink(!snap.outage);
     city.setBlackout(snap.outage ? 0.92 : 0, snap.outage ? 0.22 : 0.3);
   }, [snap?.outage, snap]);
+
+  // Amber buddy arcs while a call is still in the buddies window.
+  useEffect(() => {
+    const city = cityRef.current;
+    if (!city || !snap) return;
+    const links: { from: string; to: string }[] = [];
+    for (const inc of snap.incidents) {
+      if (inc.status !== "open" || inc.tier !== "buddies") continue;
+      for (const b of inc.buddies ?? []) links.push({ from: b.id, to: inc.household });
+    }
+    city.setBuddyArcs(links);
+  }, [snap]);
 
   // Triage
   const openKey = useMemo(
@@ -442,6 +459,12 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                 cityRef.current = c;
                 c.setCityLink(!snap.outage);
                 if (snap.outage) c.setBlackout(0.92, 10);
+                const links: { from: string; to: string }[] = [];
+                for (const inc of snap.incidents) {
+                  if (inc.status !== "open" || inc.tier !== "buddies") continue;
+                  for (const b of inc.buddies ?? []) links.push({ from: b.id, to: inc.household });
+                }
+                c.setBuddyArcs(links);
                 c.focus("ops", 0);
               }}
             />
@@ -534,6 +557,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                     </span>
                     <span className="call-reason">{r.reason}</span>
                     <span className="tags">
+                      {r.tier && TIER_CHIP[r.tier] ? (
+                        <span className={TIER_CHIP[r.tier]!.className}>{TIER_CHIP[r.tier]!.text}</span>
+                      ) : null}
                       {isFall(snap?.incidents.find((i) => i.key === r.incident)?.note) ? (
                         <span className="tag tag-fall">Possible fall</span>
                       ) : null}
@@ -652,6 +678,35 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                 <button className="btn btn-moon" type="button" onClick={() => act("ack")} disabled={!incident || incident.status !== "open"}>Dispatch a neighbour</button>
                 <button className="btn btn-quiet" type="button" onClick={() => act("ok")}>Mark safe</button>
               </div>
+              {incident ? (
+                <section className="neighbours" aria-labelledby="neighbours-h">
+                  <h3 id="neighbours-h" className="section-title">Neighbours</h3>
+                  {incident.buddies?.length ? (
+                    <p className="section-sub">
+                      Buddies: {incident.buddies.map((b) => b.label).join(", ")}
+                    </p>
+                  ) : (
+                    <p className="section-sub">No buddies recorded for this home.</p>
+                  )}
+                  {incident.neighbourThread?.length ? (
+                    <ol className="neighbour-thread">
+                      {incident.neighbourThread.map((r, i) => (
+                        <li key={`${r.atMs}-${i}`}>
+                          <span className="call-name">{r.actorLabel}</span>
+                          <span className="call-meta">
+                            {r.replyLabel}
+                            {r.note ? ` · ${r.note}` : ""}
+                            {" · "}
+                            {clock(r.atMs)}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="section-sub">No replies yet</p>
+                  )}
+                </section>
+              ) : null}
               <section className="voice" aria-labelledby="voice-h">
                 <h3 id="voice-h" className="section-title">Voice check-in</h3>
                 <p className="voice-state" data-live={String(["speaking", "listening", "playing"].includes(voice.state))}>
@@ -689,7 +744,13 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                       <li key={t.id} data-kind={t.kind}>
                         <span className="trail-time mono">{clock(t.at)}</span>
                         <span className="trail-body">
-                          <strong>{t.kind === "help" && isFall(t.note ?? undefined) ? "Possible fall" : KIND_TEXT[t.kind] ?? t.kind}</strong>
+                          <strong>
+                            {t.kind === "reply"
+                              ? `Neighbour: ${t.note ?? "reply"}`
+                              : t.kind === "help" && isFall(t.note ?? undefined)
+                                ? "Possible fall"
+                                : KIND_TEXT[t.kind] ?? t.kind}
+                          </strong>
                           <span>
                             Signed by {t.by}
                             {t.source === "beacon" && t.beacon ? ` from beacon ${t.beacon}` : ""}.{" "}

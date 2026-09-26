@@ -71,4 +71,20 @@ describe("buildOverview", () => {
     assert.match(text, /No open calls/);
     assert.match(text, /City link is down/);
   });
+
+  it("mentions homes where no neighbour has answered", () => {
+    const text = buildOverview({
+      counts: { help: 2, acknowledged: 0, ok: 0, unknown: 0 },
+      queue: [
+        { label: "12 Maple Crescent", needs: ["oxygen concentrator"], noNeighbour: true },
+        { label: "2 Pine Walk", needs: ["dialysis at home"], noNeighbour: false },
+      ],
+      silent: [],
+      outage: false,
+      emergencySince: null,
+      nodesReporting: 3,
+      nodesTotal: 3,
+    });
+    assert.match(text, /No neighbour has answered at 12 Maple Crescent/);
+  });
 });

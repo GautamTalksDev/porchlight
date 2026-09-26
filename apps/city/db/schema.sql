@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS events (
   id text NOT NULL,
   event_time timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
-  kind text NOT NULL CHECK (kind IN ('help', 'ok', 'ack', 'note')),
+  kind text NOT NULL CHECK (kind IN ('help', 'ok', 'ack', 'note', 'reply')),
   household text NOT NULL,
   origin text NOT NULL,
   delivered_by text,
@@ -58,3 +58,8 @@ CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value jsonb NOT NULL
 );
+
+/* Widen the events.kind check for existing databases created before neighbour replies.
+   CREATE TABLE IF NOT EXISTS does not replace an older CHECK, so this step is separate and idempotent. */
+ALTER TABLE events DROP CONSTRAINT IF EXISTS events_kind_check;
+ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK (kind IN ('help', 'ok', 'ack', 'note', 'reply'));

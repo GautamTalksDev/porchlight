@@ -314,6 +314,9 @@ html { scroll-behavior: smooth; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #262c52; color: #ece6d9; }
 .tag-power { background: rgba(255, 106, 85, 0.16); color: #ff6a55; }
 .tag-fall { background: rgba(255, 106, 85, 0.22); color: #ff6a55; }
+.tag-tier-buddies { background: rgba(242, 179, 94, 0.18); color: #f2b35e; }
+.tag-tier-street { background: rgba(255, 140, 60, 0.2); color: #ff8c3c; }
+.tag-tier-city { background: rgba(255, 106, 85, 0.22); color: #ff6a55; }
 .triage-source { font-size: 0.875rem; color: #b3aec6; }
 .empty { color: #b3aec6; }
 
@@ -388,7 +391,12 @@ kbd { font-family: "Atkinson Mono", ui-monospace, monospace; font-size: 0.75rem;
 .trail li[data-kind="help"] .trail-body strong { color: #ff6a55; }
 .trail li[data-kind="ack"] .trail-body strong { color: #9ec5ff; }
 .trail li[data-kind="ok"] .trail-body strong { color: #f2b35e; }
+.trail li[data-kind="reply"] .trail-body strong { color: #f2b35e; }
 .verified { justify-self: start; font-size: 0.72rem; padding: 1px 8px; border-radius: 999px; color: #9fe2b5; background: rgba(120, 220, 160, 0.1); border: 1px solid rgba(120, 220, 160, 0.3); }
+
+.neighbours { display: grid; gap: 0.5rem; border-top: 1px solid rgba(236, 230, 217, 0.12); padding-top: 1rem; }
+.neighbour-thread { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.neighbour-thread li { display: grid; gap: 0.1rem; padding: 0.45rem 0.6rem; border-radius: 10px; background: rgba(28, 33, 64, 0.6); }
 
 .street { display: grid; gap: 0.3rem; margin-top: 0.8rem; }
 .street-row { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 0.7rem; align-items: center; padding: 0.55rem 0.7rem; border-radius: 10px; border: 1px solid transparent; background: rgba(28, 33, 64, 0.6); cursor: pointer; text-align: left; }

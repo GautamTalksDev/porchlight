@@ -115,6 +115,8 @@ export function resolveHousehold(
 export interface OverviewQueueItem {
   label: string;
   needs: string[];
+  /** True when Porch Circles has escalated to the city with no neighbour reply. */
+  noNeighbour?: boolean;
 }
 
 export interface OverviewSilentItem {
@@ -150,6 +152,12 @@ export function buildOverview(input: OverviewInput): string {
       else parts.push(`Then ${item.label}, ${need}.`);
     }
     if (open.length > 3) parts.push(`And ${open.length - 3} more in the queue.`);
+    const lonely = open.filter((q) => q.noNeighbour).map((q) => q.label);
+    if (lonely.length === 1) {
+      parts.push(`No neighbour has answered at ${lonely[0]}.`);
+    } else if (lonely.length > 1) {
+      parts.push(`No neighbour has answered at ${lonely.length} homes, including ${lonely[0]}.`);
+    }
   }
 
   if (input.silent.length) {
