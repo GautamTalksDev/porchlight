@@ -1,34 +1,41 @@
-import { z } from "zod";
 import { GoogleGenAI } from "@google/genai";
 import { denyUnlessCoordinator } from "@/lib/auth";
-import { buildNoticeTranslatePrompt, NOTICE_TRANSLATE_SYSTEM, parseNoticeTranslateResponse } from "@/lib/notice-translate";
+import {
+  buildNoticeTranslatePrompt,
+  describeNoticeTranslateFailure,
+  NOTICE_TRANSLATE_SYSTEM,
+  parseNoticeTranslateBody,
+  parseNoticeTranslateResponse,
+} from "@/lib/notice-translate";
 import { allow, clientKey } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const Body = z.object({
-  en: z.string().min(1).max(280),
-});
+function fail(status: number, reason: string) {
+  console.error(`[notices] translate failed: ${reason}`);
+  return Response.json({ ok: false, reason }, { status });
+}
 
 /** Ask Gemini for a Canadian French version of an English notice. No paid call when the key is missing. */
 export async function POST(req: Request) {
   const denied = await denyUnlessCoordinator();
   if (denied) return denied;
   if (!allow(`notices-translate:${clientKey(req)}`, 10, 30)) {
-    return Response.json({ ok: false, reason: "slow down" }, { status: 429 });
+    return fail(429, "slow down");
   }
-  const parsed = Body.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return Response.json({ ok: false, reason: "English text is required" }, { status: 400 });
+
+  const parsed = parseNoticeTranslateBody(await req.json().catch(() => null));
+  if (!parsed.ok) return fail(parsed.status, parsed.reason);
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return Response.json({ ok: false, reason: "Gemini is not configured. Type the French text by hand." }, { status: 503 });
+    return fail(503, describeNoticeTranslateFailure("api key"));
   }
 
   const models = [...new Set([process.env.GEMINI_MODEL || "gemini-3.6-flash", process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash"])];
   const ai = new GoogleGenAI({ apiKey });
-  const prompt = buildNoticeTranslatePrompt(parsed.data.en);
+  const prompt = buildNoticeTranslatePrompt(parsed.en);
   let lastError = "Gemini is unavailable";
   for (const model of models) {
     try {
@@ -50,5 +57,5 @@ export async function POST(req: Request) {
       lastError = (err as Error).message;
     }
   }
-  return Response.json({ ok: false, reason: lastError }, { status: 503 });
+  return fail(503, describeNoticeTranslateFailure(lastError));
 }

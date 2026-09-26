@@ -1,6 +1,6 @@
 "use client";
 
-import { useImperativeHandle, useState, forwardRef } from "react";
+import { useImperativeHandle, useRef, useState, forwardRef } from "react";
 
 export type NoticeSeverity = "info" | "urgent";
 
@@ -45,32 +45,54 @@ export const NoticesPanel = forwardRef<
   const [translateError, setTranslateError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const enRef = useRef(en);
+  const frRef = useRef(fr);
+  const severityRef = useRef(severity);
+  const onOpenChangeRef = useRef(onOpenChange);
+  const onSentRef = useRef(onSent);
+  enRef.current = en;
+  frRef.current = fr;
+  severityRef.current = severity;
+  onOpenChangeRef.current = onOpenChange;
+  onSentRef.current = onSent;
 
-  const translate = async (english: string) => {
+  /** Always posts the latest trimmed English (from the argument, or the live ref). */
+  const translate = async (english?: string) => {
+    const text = (english ?? enRef.current).trim();
+    if (!text) {
+      const reason = "English text is required";
+      setTranslateError(reason);
+      setModelNote(null);
+      return { ok: false as const, frFilled: false, error: reason };
+    }
     setBusy(true);
     setTranslateError(null);
     try {
-      const r = await post("/api/notices/translate", { en: english.trim() });
+      const r = await post("/api/notices/translate", { en: text });
       if (!r.ok) {
-        setTranslateError("Gemini is unavailable. Type the French version to send.");
+        const reason = String(r.data.reason ?? "Gemini is unavailable");
+        setTranslateError(reason);
         setModelNote(null);
-        return { ok: false as const, frFilled: false, error: String(r.data.reason ?? "unavailable") };
+        return { ok: false as const, frFilled: false, error: reason };
       }
-      setFr(String(r.data.fr ?? ""));
+      const drafted = String(r.data.fr ?? "");
+      frRef.current = drafted;
+      setFr(drafted);
       setModelNote(`Drafted by ${r.data.model}. Check it before sending.`);
       return { ok: true as const, frFilled: true, model: String(r.data.model ?? "") };
     } catch {
-      setTranslateError("Gemini is unavailable. Type the French version to send.");
+      const reason = "Could not reach the translate service. Type the French version to send.";
+      setTranslateError(reason);
       setModelNote(null);
-      return { ok: false as const, frFilled: false, error: "unavailable" };
+      return { ok: false as const, frFilled: false, error: reason };
     } finally {
       setBusy(false);
     }
   };
 
   const send = async () => {
-    const enT = en.trim();
-    const frT = fr.trim();
+    const enT = enRef.current.trim();
+    const frT = frRef.current.trim();
     if (!enT || !frT) {
       return {
         ok: false as const,
@@ -79,13 +101,15 @@ export const NoticesPanel = forwardRef<
     }
     setBusy(true);
     try {
-      const r = await post("/api/notices", { en: enT, fr: frT, severity });
+      const r = await post("/api/notices", { en: enT, fr: frT, severity: severityRef.current });
       if (!r.ok) return { ok: false as const, reason: String(r.data.reason ?? "Could not send") };
+      enRef.current = "";
+      frRef.current = "";
       setEn("");
       setFr("");
       setModelNote(null);
       setTranslateError(null);
-      onSent();
+      onSentRef.current();
       return { ok: true as const };
     } finally {
       setBusy(false);
@@ -94,19 +118,22 @@ export const NoticesPanel = forwardRef<
 
   useImperativeHandle(ref, () => ({
     openWithEnglish: async (text: string) => {
-      onOpenChange(true);
+      onOpenChangeRef.current(true);
+      enRef.current = text;
       setEn(text);
+      frRef.current = "";
       setFr("");
       setModelNote(null);
       setTranslateError(null);
       return translate(text);
     },
     sendCurrent: () => send(),
-    getDraft: () => ({ en, fr, severity }),
+    getDraft: () => ({ en: enRef.current, fr: frRef.current, severity: severityRef.current }),
   }));
 
   if (!open) return null;
 
+  const canDraft = Boolean(en.trim()) && !busy;
   const canSend = Boolean(en.trim() && fr.trim()) && !busy;
 
   return (
@@ -125,14 +152,22 @@ export const NoticesPanel = forwardRef<
           rows={3}
           maxLength={280}
           value={en}
-          onChange={(e) => setEn(e.target.value)}
+          onChange={(e) => {
+            enRef.current = e.target.value;
+            setEn(e.target.value);
+          }}
           placeholder="What should the street hear?"
         />
         <span className="notice-count">{en.length} / 280</span>
       </label>
 
       <div className="row">
-        <button className="btn btn-quiet btn-small" type="button" onClick={() => void translate(en)} disabled={!en.trim() || busy}>
+        <button
+          className="btn btn-quiet btn-small"
+          type="button"
+          onClick={() => void translate()}
+          disabled={!canDraft}
+        >
           Draft French
         </button>
       </div>
@@ -146,7 +181,10 @@ export const NoticesPanel = forwardRef<
           rows={3}
           maxLength={320}
           value={fr}
-          onChange={(e) => setFr(e.target.value)}
+          onChange={(e) => {
+            frRef.current = e.target.value;
+            setFr(e.target.value);
+          }}
           placeholder="Version française"
         />
         <span className="notice-count">{fr.length} / 320</span>
