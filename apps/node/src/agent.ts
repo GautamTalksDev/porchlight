@@ -64,6 +64,9 @@ export class NodeAgent {
   readonly beacons = new Map<string, BeaconState>();
   private readonly uplinked = new Set<string>();
   private readonly listeners = new Set<() => void>();
+  private readonly beaconAckListeners = new Set<(msg: { beaconId: string; frame: string; incident: string }) => void>();
+  /** Incidents that already had a beacon-ack published (or handled by this console's /api/ack). */
+  private readonly publishedBeaconAcks = new Set<string>();
   private timers: NodeJS.Timeout[] = [];
   private uplinkBackoffMs = 0;
   private uplinkNextAt = 0;
@@ -97,6 +100,7 @@ export class NodeAgent {
     for (const ev of this.store.all()) this.observe(ev);
     this.store.onAdd((ev) => {
       this.observe(ev);
+      if (ev.kind === "ack") this.maybePublishBeaconAck(ev);
       this.changed();
     });
   }
@@ -108,6 +112,37 @@ export class NodeAgent {
       const [beaconId, sessionHex, counter] = ev.incident.split(":");
       if (beaconId && sessionHex && counter) this.guard.seen(beaconId, parseInt(sessionHex, 16), Number(counter));
     }
+  }
+
+  /**
+   * When an ack arrives from the city or another node for a beacon help event, publish the
+   * authenticated ack frame so a connected console can turn the beacon green.
+   */
+  private maybePublishBeaconAck(ack: SignedEvent): void {
+    if (!ack.ref) return;
+    const help = this.store.get(ack.ref);
+    if (!help || help.kind !== "help" || help.source.type !== "beacon" || !help.source.beacon || !help.incident) return;
+    if (this.publishedBeaconAcks.has(help.incident)) return;
+    // This console's own "I'm on my way" already returns the frame over HTTP.
+    if (ack.origin === this.identity.id) {
+      this.publishedBeaconAcks.add(help.incident);
+      return;
+    }
+    const built = this.beaconAckFrame(help.incident);
+    if (!built) return;
+    this.publishedBeaconAcks.add(help.incident);
+    for (const fn of this.beaconAckListeners) fn({ beaconId: built.beaconId, frame: built.frame, incident: help.incident });
+  }
+
+  /** Build the authenticated ack frame a beacon expects for one incident key. */
+  beaconAckFrame(incidentKey: string): { beaconId: string; frame: string } | undefined {
+    const [beaconId, sessionHex, counter] = incidentKey.split(":");
+    const key = beaconId ? this.config.beaconKeys.get(beaconId) : undefined;
+    if (!key || !beaconId || !sessionHex || !counter) return undefined;
+    return {
+      beaconId,
+      frame: bytesToHex(encodeFrame(beaconId, key, "ack", parseInt(sessionHex, 16), Number(counter))),
+    };
   }
 
   // Lifecycle
@@ -127,6 +162,11 @@ export class NodeAgent {
   onChange(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  onBeaconAck(fn: (msg: { beaconId: string; frame: string; incident: string }) => void): () => void {
+    this.beaconAckListeners.add(fn);
+    return () => this.beaconAckListeners.delete(fn);
   }
 
   private changed(): void {
@@ -249,13 +289,9 @@ export class NodeAgent {
       source: { type: "console" },
     });
     this.store.add(ev);
-    const [beaconId, sessionHex, counter] = inc.key.split(":");
-    const key = beaconId ? this.config.beaconKeys.get(beaconId) : undefined;
-    let ackFrame: string | undefined;
-    if (key && beaconId && sessionHex && counter) {
-      ackFrame = bytesToHex(encodeFrame(beaconId, key, "ack", parseInt(sessionHex, 16), Number(counter)));
-    }
-    return { event: ev, ackFrame };
+    const built = this.beaconAckFrame(inc.key);
+    if (built) this.publishedBeaconAcks.add(inc.key);
+    return { event: ev, ackFrame: built?.frame };
   }
 
   setUplinkCut(cut: boolean): void {

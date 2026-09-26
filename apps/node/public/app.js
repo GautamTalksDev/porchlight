@@ -1,6 +1,6 @@
 // Porchlight node console. No framework, no inline scripts, DOM built with textContent only.
 
-const TOKEN = document.querySelector('meta[name="pl-token"]').content;
+let TOKEN = document.querySelector('meta[name="pl-token"]').content;
 const FALL_NOTE = "Possible fall detected by the beacon. No button was pressed.";
 const BLE = {
   service: "7a1f0001-5c3e-4f6b-9d2a-6c1e0b8f4a10",
@@ -59,7 +59,7 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-async function api(path, body) {
+async function api(path, body, retried = false) {
   const res = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json", "x-porchlight-token": TOKEN },
@@ -67,6 +67,16 @@ async function api(path, body) {
   });
   let data = {};
   try { data = await res.json(); } catch { /* empty */ }
+  if (res.status === 401 && !retried) {
+    try {
+      const s = await fetch("/api/session", { cache: "no-store" });
+      const session = await s.json().catch(() => ({}));
+      if (s.ok && session.token) {
+        TOKEN = session.token;
+        return api(path, body, true);
+      }
+    } catch { /* fall through to error below */ }
+  }
   if (!res.ok && res.status !== 200) {
     const err = new Error(data.reason || `Request failed (${res.status})`);
     err.status = res.status;
@@ -190,11 +200,41 @@ function renderStreet(households) {
   );
 }
 
+function collapseAlerts(incidents) {
+  const list = incidents.filter((i) => i.status !== "resolved");
+  const best = new Map();
+  const heard = new Map();
+  const openKeys = new Map();
+  const fall = new Map();
+  const rank = (i) => (i.status === "open" ? 0 : 1);
+  for (const inc of list) {
+    const w = heard.get(inc.household) ?? new Set();
+    for (const x of inc.witnesses) w.add(x);
+    heard.set(inc.household, w);
+    if (inc.status === "open") {
+      const keys = openKeys.get(inc.household) ?? [];
+      keys.push(inc.key);
+      openKeys.set(inc.household, keys);
+      if (inc.note === FALL_NOTE) fall.set(inc.household, true);
+    }
+    const cur = best.get(inc.household);
+    if (!cur || rank(inc) < rank(cur) || (rank(inc) === rank(cur) && hlcWall(inc.openedAt) < hlcWall(cur.openedAt))) {
+      best.set(inc.household, inc);
+    }
+  }
+  return [...best.values()].map((i) => ({
+    ...i,
+    witnesses: [...(heard.get(i.household) ?? [])],
+    openKeys: openKeys.get(i.household) ?? [],
+    showFall: fall.get(i.household) === true,
+  }));
+}
+
 function renderAlerts(incidents) {
-  const open = incidents.filter((i) => i.status !== "resolved");
-  $("#alerts-empty").hidden = open.length > 0;
+  const cards = collapseAlerts(incidents);
+  $("#alerts-empty").hidden = cards.length > 0;
   $("#alerts").replaceChildren(
-    ...open.map((i) => {
+    ...cards.map((i) => {
       const heard = i.witnesses.length === 1 ? "Heard by 1 node" : `Heard by ${i.witnesses.length} nodes`;
       const acked = i.status === "acknowledged";
       return el(
@@ -202,7 +242,7 @@ function renderAlerts(incidents) {
         { class: "alert", dataset: { status: i.status } },
         el("p", { class: "alert-title" }, i.label),
         el("p", { class: "alert-meta" }, `${acked ? "A neighbour is on the way." : "Waiting for a neighbour."} ${heard}, ${ago(hlcWall(i.openedAt))}.`),
-        i.note === FALL_NOTE ? el("p", {}, "Possible fall, no button pressed") : i.note ? el("p", {}, i.note) : null,
+        i.showFall ? el("p", {}, "Possible fall, no button pressed") : i.note && i.note !== FALL_NOTE ? el("p", {}, i.note) : null,
         acked
           ? null
           : el("div", { class: "row" }, el("button", { class: "btn btn-ack", type: "button", onclick: () => acknowledge(i) }, "I'm on my way")),
@@ -211,7 +251,7 @@ function renderAlerts(incidents) {
   );
 
   // Announce alerts that arrived since the last render (not on first load).
-  for (const i of open) {
+  for (const i of cards) {
     if (!seenIncidents.has(i.key)) {
       seenIncidents.add(i.key);
       if (!firstRender && !i.witnesses.includes(state.node.id)) speak("neighbour-alert", state.households.find((h) => h.household === i.household)?.lang);
@@ -289,11 +329,14 @@ $("#house-sheet").addEventListener("close", async () => {
   }
 });
 
-async function acknowledge(incident) {
+async function acknowledge(card) {
+  const keys = card.openKeys?.length ? card.openKeys : [card.key];
   try {
-    const r = await api("/api/ack", { incident: incident.key });
-    toast(`You're on your way to ${incident.label}`);
-    if (r.ackFrame && beacon.beaconId && incident.key.startsWith(`${beacon.beaconId}:`)) await sendAck(r.ackFrame);
+    for (const key of keys) {
+      const r = await api("/api/ack", { incident: key });
+      if (r.ackFrame && beacon.beaconId && key.startsWith(`${beacon.beaconId}:`)) await sendAck(r.ackFrame);
+    }
+    toast(`You're on your way to ${card.label}`);
   } catch (err) {
     toast(err.message, "error");
   }
@@ -457,6 +500,10 @@ async function readSerial(port) {
 function connectStream() {
   const es = new EventSource("/api/stream");
   es.addEventListener("state", (e) => render(JSON.parse(e.data)));
+  es.addEventListener("beacon-ack", (e) => {
+    const msg = JSON.parse(e.data);
+    if (beacon.beaconId && msg.beaconId === beacon.beaconId && msg.frame) void sendAck(msg.frame);
+  });
   es.onerror = () => {
     es.close();
     setTimeout(connectStream, 1500);

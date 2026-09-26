@@ -74,12 +74,18 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
   const requireLocal = (req: IncomingMessage, write: boolean) => {
     if (!isLoopback(req) && !agent.config.uiPublic) throw new HttpError(403, "console is only available on this device");
     if (write) {
-      if (req.headers["x-porchlight-token"] !== sessionToken) throw new HttpError(403, "missing or stale session token, reload the page");
+      if (req.headers["x-porchlight-token"] !== sessionToken) throw new HttpError(401, "missing or stale session token, reload the page");
       const origin = req.headers.origin;
       const host = req.headers.host;
       if (origin && host && new URL(origin).host !== host) throw new HttpError(403, "cross-origin request blocked");
       if (!localLimiter.take(req.socket.remoteAddress ?? "local")) throw new HttpError(429, "slow down");
     }
+  };
+
+  const requireConsoleOrigin = (req: IncomingMessage) => {
+    const origin = req.headers.origin;
+    const host = req.headers.host;
+    if (origin && host && new URL(origin).host !== host) throw new HttpError(403, "cross-origin request blocked");
   };
 
   const serveFile = (res: ServerResponse, path: string, cache = "no-cache") => {
@@ -98,6 +104,10 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
       const data = `event: state\ndata: ${JSON.stringify(agent.state())}\n\n`;
       for (const c of sseClients) c.write(data);
     }, 120);
+  });
+  agent.onBeaconAck(({ beaconId, frame }) => {
+    const data = `event: beacon-ack\ndata: ${JSON.stringify({ beaconId, frame })}\n\n`;
+    for (const c of sseClients) c.write(data);
   });
   // Heartbeat: gossip with peers that are already in sync changes no data, so push the full state
   // every 2 seconds anyway. Peer health and "last delivered" times then stay true on screen.
@@ -153,6 +163,11 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
     if (path === "/api/state" && method === "GET") {
       requireLocal(req, false);
       return sendJson(res, 200, agent.state());
+    }
+    if (path === "/api/session" && method === "GET") {
+      requireLocal(req, false);
+      requireConsoleOrigin(req);
+      return sendJson(res, 200, { token: sessionToken });
     }
     if (path === "/api/clips" && method === "GET") {
       requireLocal(req, false);

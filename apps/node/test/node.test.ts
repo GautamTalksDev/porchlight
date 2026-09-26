@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { FALL_NOTE, bytesToHex, createEvent, encodeFrame, generateIdentity, hexToBytes } from "@porchlight/protocol";
+import { FALL_NOTE, HybridClock, bytesToHex, createEvent, encodeFrame, generateIdentity, hexToBytes } from "@porchlight/protocol";
 import { NodeAgent } from "../src/agent";
 import { createCityStub } from "../src/city-stub";
 import { loadConfig } from "../src/config";
@@ -92,7 +92,7 @@ describe("three nodes and a city", () => {
     const r1 = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame: bad, via: "ble" });
     assert.equal(r1.status, 401);
     const r2 = await post(nodes[0]!, "/api/uplink", { cut: true }, "wrong");
-    assert.equal(r2.status, 403);
+    assert.equal(r2.status, 401);
   });
 
   it("holds events while the city link is cut and flushes on restore", async () => {
@@ -166,5 +166,32 @@ describe("three nodes and a city", () => {
     assert.equal(city.store.add(ack).added, true);
     await until(() => nodes[0]!.agent.state().incidents.some((i) => i.key === incidentKey && i.status === "acknowledged"));
     await until(() => nodes[1]!.agent.state().incidents.some((i) => i.key === incidentKey && i.status === "acknowledged"));
+  });
+
+  it("an ack for a beacon incident that arrives by gossip publishes beacon-ack once", async () => {
+    await new Promise((r) => setTimeout(r, 900));
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 7));
+    const res = await post(nodes[1]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -52 });
+    assert.equal(res.status, 200);
+    const incidentKey = "pl-b01:00001234:7";
+    await until(() => nodes[0]!.agent.state().incidents.some((i) => i.key === incidentKey));
+    const help = nodes[0]!.agent.store.all().find((e) => e.kind === "help" && e.incident === incidentKey)!;
+    const pubs: { beaconId: string; frame: string; incident: string }[] = [];
+    const off = nodes[0]!.agent.onBeaconAck((m) => pubs.push(m));
+    const stranger = generateIdentity();
+    const ack = createEvent(stranger, new HybridClock(stranger.id), {
+      kind: "ack",
+      household: "hh-maple-12",
+      ref: help.id,
+      source: { type: "console" },
+    });
+    assert.equal(nodes[2]!.agent.store.add(ack).added, true);
+    await until(() => pubs.length >= 1);
+    assert.equal(pubs.length, 1);
+    assert.equal(pubs[0]!.beaconId, "pl-b01");
+    assert.equal(pubs[0]!.incident, incidentKey);
+    assert.equal(nodes[0]!.agent.store.add(ack).added, false);
+    assert.equal(pubs.length, 1);
+    off();
   });
 });
