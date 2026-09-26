@@ -15,6 +15,7 @@ import {
   encodeFrame,
   escalationTier,
   hexToBytes,
+  isStreetHousehold,
   project,
   syncWith,
   type NodeIdentity,
@@ -517,7 +518,9 @@ export class NodeAgent {
       ...Object.keys(this.config.households.households)
         .filter((h) => !known.has(h))
         .map((h) => ({ household: h, status: "unknown" as const, lastEventAt: "" })),
-    ].map((h) => {
+    ]
+      .filter((h) => isStreetHousehold(h.household))
+      .map((h) => {
       const info = this.config.households.households[h.household];
       return {
         ...h,
@@ -526,6 +529,17 @@ export class NodeAgent {
         buddies: info?.buddies ?? [],
       };
     });
+    const notices = events
+      .filter((e) => e.kind === "notice" && e.notice && (!this.cityOrigin || e.origin === this.cityOrigin))
+      .sort((a, b) => decodeHlc(b.hlc).wall - decodeHlc(a.hlc).wall)
+      .slice(0, 3)
+      .map((e) => ({
+        id: e.id,
+        en: e.notice!.en,
+        fr: e.notice!.fr,
+        severity: e.notice!.severity,
+        at: decodeHlc(e.hlc).wall,
+      }));
     return {
       node: {
         id: this.identity.id,
@@ -552,7 +566,10 @@ export class NodeAgent {
       counts: { events: events.length, rejected: this.store.rejected },
       beacons: [...this.beacons.values()].map((b) => ({ ...b, label: b.household ? label(b.household) : undefined })),
       households,
-      incidents: p.incidents.map((i) => {
+      notices,
+      incidents: p.incidents
+        .filter((i) => isStreetHousehold(i.household))
+        .map((i) => {
         const openedAtMs = decodeHlc(i.openedAt).wall;
         const tier = escalationTier({
           incidentOpenedAt: openedAtMs,

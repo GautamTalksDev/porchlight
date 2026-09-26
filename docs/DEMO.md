@@ -38,6 +38,8 @@ flowchart LR
 
 **2:35 Hey Porchlight.** Press **V** or click **Talk to Porchlight**. Ask “who needs help?” then “show Maple” and “dispatch Maple”. The floating panel shows the tool lines, the camera flies to the home, and the dispatch appears on the signed log. End the copilot before any resident call; they never run at the same time.
 
+**2:42 City notice.** Say “Porchlight, tell the street the warming centre at Heron Road is open until midnight.” Review the French draft on screen, then say “Send it” (or click **Send to the street**). A soft ring expands from City Hall. On a node console the banner appears (even if the city link is cut, once gossip has carried it). In Notices, confirm **Reached 3 of 3 nodes**.
+
 **2:50 Proof and close.** Story mode, last two chapters. "We dropped a third of all messages and cut the city 50 times. Zero of 200 alerts lost. When the grid goes dark, the porch lights stay on."
 
 ## If something breaks

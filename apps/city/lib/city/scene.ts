@@ -114,6 +114,7 @@ export class PorchlightCity {
   private readonly hitboxes: THREE.Mesh[] = [];
   private readonly travellers: Traveller[] = [];
   private readonly buddyArcs: THREE.Line[] = [];
+  private noticeRing?: { mesh: THREE.Mesh; start: number; duration: number };
   private rain?: THREE.LineSegments;
   /** Signs and clock faces that run on grid power and go dark with the storm. */
   private readonly gridLights: { mat: THREE.MeshBasicMaterial; base: THREE.Color; x: number }[] = [];
@@ -666,6 +667,36 @@ export class PorchlightCity {
     }
   }
 
+  /** Soft ring of light expanding from City Hall when a notice is sent to the street. */
+  announceNotice(): void {
+    if (this.noticeRing) {
+      this.scene.remove(this.noticeRing.mesh);
+      this.noticeRing.mesh.geometry.dispose();
+      (this.noticeRing.mesh.material as THREE.Material).dispose();
+      this.noticeRing = undefined;
+    }
+    const geo = new THREE.RingGeometry(2, 4, 64);
+    const mat = new THREE.MeshBasicMaterial({
+      color: "#9ec5ff",
+      transparent: true,
+      opacity: this.reducedMotion ? 0.35 : 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(this.mastTop.x, 1.2, this.mastTop.z);
+    this.scene.add(mesh);
+    if (this.reducedMotion) {
+      mesh.scale.setScalar(45);
+      this.noticeRing = { mesh, start: performance.now(), duration: 900 };
+    } else {
+      mesh.scale.setScalar(1);
+      this.noticeRing = { mesh, start: performance.now(), duration: 2200 };
+    }
+  }
+
   /** A message hopping between two households' nodes. */
   pulse(fromId: string, toId: string, color: THREE.ColorRepresentation = COLORS.porch, onArrive?: () => void): void {
     const a = this.houses.get(fromId);
@@ -877,6 +908,24 @@ export class PorchlightCity {
         }
         this.travellers.splice(i, 1);
         t.onArrive?.();
+      }
+    }
+
+    if (this.noticeRing) {
+      const ring = this.noticeRing;
+      const k = Math.min(1, (now - ring.start) / ring.duration);
+      if (this.reducedMotion) {
+        (ring.mesh.material as THREE.MeshBasicMaterial).opacity = 0.35 * (1 - k);
+      } else {
+        const scale = 1 + k * 70;
+        ring.mesh.scale.setScalar(scale);
+        (ring.mesh.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - k);
+      }
+      if (k >= 1) {
+        this.scene.remove(ring.mesh);
+        ring.mesh.geometry.dispose();
+        (ring.mesh.material as THREE.Material).dispose();
+        this.noticeRing = undefined;
       }
     }
 

@@ -132,6 +132,7 @@ export interface OverviewInput {
   emergencySince: number | null;
   nodesReporting: number;
   nodesTotal: number;
+  latestNotice?: { en: string; reachedNodes: number; totalNodes: number } | null;
 }
 
 /** A short spoken summary for the coordinator, kept under 80 words. */
@@ -169,6 +170,13 @@ export function buildOverview(input: OverviewInput): string {
         `${input.silent.length} silent homes. Highest risk is ${s.label}, quiet for ${s.minutesSilent} minutes.`,
       );
     }
+  }
+
+  if (input.latestNotice) {
+    const n = input.latestNotice;
+    parts.push(
+      `Latest notice: ${n.en} Reached ${n.reachedNodes} of ${n.totalNodes} nodes.`,
+    );
   }
 
   if (input.outage) parts.push("City link is down; nodes are holding calls.");

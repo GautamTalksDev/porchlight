@@ -10,6 +10,7 @@ import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { useCopilot } from "./useCopilot";
 import { useVoiceCall } from "./useVoiceCall";
+import { NoticesPanel, type NoticesApi } from "./NoticesPanel";
 import type { CopilotLive } from "./useCopilot";
 import { summarizePreflight, type PreflightCheck } from "@/lib/preflight";
 
@@ -71,6 +72,8 @@ export default function OpsRoom({
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [preflightChecks, setPreflightChecks] = useState<PreflightCheck[] | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
+  const [noticesOpen, setNoticesOpen] = useState(false);
+  const noticesApiRef = useRef<NoticesApi | null>(null);
   const [, setTick] = useState(0);
   const cityRef = useRef<PorchlightCity | null>(null);
   const snapRef = useRef<CitySnapshot | null>(null);
@@ -225,6 +228,7 @@ export default function OpsRoom({
 
   const copilot = useCopilot({
     liveRef,
+    noticesApiRef,
     onSelect: choose,
     onFocus: (target) => cityRef.current?.focus(target),
     onStartCheckIn: (householdId, incidentKey) => {
@@ -389,6 +393,11 @@ export default function OpsRoom({
         e.preventDefault();
         return;
       }
+      if (key === "n" && !e.shiftKey) {
+        setNoticesOpen((o) => !o);
+        e.preventDefault();
+        return;
+      }
       if (key === "j" && items.length) choose(items[Math.min(items.length - 1, idx + 1)]!.household);
       else if (key === "k" && items.length) choose(items[Math.max(0, idx - 1)]!.household);
       else if (key === "c" && household && !copilotBusy && !copilotOpen) void startResidentCall(household.id, incident?.key ?? null);
@@ -397,6 +406,7 @@ export default function OpsRoom({
       else if (key === "s" && household) void act("ok");
       else if (key === "escape") {
         if (resetConfirm) setResetConfirm(false);
+        else if (noticesOpen) setNoticesOpen(false);
         else if (preflightOpen) setPreflightOpen(false);
         else if (copilotOpen) void copilot.end();
         else {
@@ -425,6 +435,7 @@ export default function OpsRoom({
     demoResetEnabled,
     resetConfirm,
     preflightOpen,
+    noticesOpen,
   ]);
 
   useEffect(() => {
@@ -487,6 +498,15 @@ export default function OpsRoom({
               {snap?.emergencySince ? "End emergency" : "Declare emergency"}
             </button>
           </span>
+          <button
+            className="btn btn-quiet btn-small"
+            type="button"
+            aria-pressed={noticesOpen}
+            title="Notices (N)"
+            onClick={() => setNoticesOpen((o) => !o)}
+          >
+            Notices
+          </button>
           <button
             className="btn btn-quiet btn-small"
             type="button"
@@ -598,6 +618,20 @@ export default function OpsRoom({
             </button>
           </div>
         ) : null}
+
+        <NoticesPanel
+          ref={(api) => {
+            noticesApiRef.current = api;
+          }}
+          open={noticesOpen}
+          onOpenChange={setNoticesOpen}
+          notices={snap?.notices ?? []}
+          onSent={() => {
+            cityRef.current?.announceNotice();
+            setNotice("Notice sent to the street");
+            void refreshTriage();
+          }}
+        />
 
         {resetConfirm ? (
           <div className="demo-reset-dialog" role="alertdialog" aria-labelledby="demo-reset-h" aria-modal="true">

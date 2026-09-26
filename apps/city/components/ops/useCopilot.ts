@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { buildOverview, resolveHousehold } from "@/lib/copilot";
 import type { CitySnapshot } from "@/lib/city";
 import type { TriageResult } from "@/lib/triage";
+import type { NoticesApi } from "./NoticesPanel";
 
 export interface CopilotLine {
   who: "agent" | "user" | "tool";
@@ -54,6 +55,7 @@ function mentionsOverrideOrPermission(reason: string): boolean {
  */
 export function useCopilot(opts: {
   liveRef: MutableRefObject<CopilotLive>;
+  noticesApiRef: MutableRefObject<NoticesApi | null>;
   onSelect: (householdId: string | null) => void;
   onFocus: (target: string) => void;
   onStartCheckIn: (householdId: string, incidentKey: string | null) => void;
@@ -135,6 +137,7 @@ export function useCopilot(opts: {
         clientTools: {
           get_overview: async () => {
             const live = optsRef.current.liveRef.current;
+            const latest = live.snap?.notices?.[0];
             const text = buildOverview({
               counts: live.counts,
               queue: (live.triage?.items ?? []).map((i) => ({
@@ -150,6 +153,9 @@ export function useCopilot(opts: {
               emergencySince: live.snap?.emergencySince ?? null,
               nodesReporting: live.nodesReporting,
               nodesTotal: live.nodesTotal,
+              latestNotice: latest
+                ? { en: latest.en, reachedNodes: latest.reachedNodes, totalNodes: latest.totalNodes }
+                : null,
             });
             return tool("Overview", text);
           },
@@ -265,6 +271,39 @@ export function useCopilot(opts: {
             const r = await post("/api/outage", { down: active });
             if (!r.ok) return tool("Outage", "Could not update the city link.");
             return tool("Outage", active ? "City outage simulated." : "City link restored.");
+          },
+          draft_notice: async (p: { text?: string }) => {
+            const text = (p?.text ?? "").trim();
+            if (!text) return tool("Draft notice", "What should the notice say in English?");
+            const api = optsRef.current.noticesApiRef.current;
+            if (!api) return tool("Draft notice", "The notices panel is not ready. Open Notices and try again.");
+            const result = await api.openWithEnglish(text);
+            optsRef.current.onToolUsed();
+            if (!result.frFilled) {
+              return tool(
+                "Draft notice",
+                "Drafted in English. Gemini could not draft the French, so type the French on screen before sending.",
+              );
+            }
+            return tool("Draft notice", "Drafted in English and French. It's on screen. Say send it when you're ready.");
+          },
+          send_notice: async () => {
+            const api = optsRef.current.noticesApiRef.current;
+            if (!api) return tool("Send notice", "The notices panel is not ready. Open Notices and try again.");
+            const draft = api.getDraft();
+            if (!draft.en.trim() || !draft.fr.trim()) {
+              const missing =
+                !draft.en.trim() && !draft.fr.trim()
+                  ? "English and French"
+                  : !draft.en.trim()
+                    ? "English"
+                    : "French";
+              return tool("Send notice", `${missing} is missing. Fill both languages before sending.`);
+            }
+            const result = await api.sendCurrent();
+            optsRef.current.onToolUsed();
+            if (!result.ok) return tool("Send notice", result.reason ?? "Could not send the notice.");
+            return tool("Send notice", "Sent to the street.");
           },
         },
         onMessage: (m) =>

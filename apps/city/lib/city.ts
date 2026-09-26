@@ -7,6 +7,7 @@ import {
   createEvent,
   decodeHlc,
   escalationTier,
+  isStreetHousehold,
   project,
   type NoticePayload,
   type SignedEvent,
@@ -20,6 +21,7 @@ import { noticeReachStats, recordNoticeConfirmations } from "./notice-delivery";
 import { NEED_LABELS, registry } from "./registry";
 import { computeSilent } from "./silence";
 import { shouldSkipAnalytics } from "./analytics-backoff";
+import { withoutBroadcastHousehold } from "./street-households";
 
 export interface NodeSeen {
   id: string;
@@ -295,40 +297,44 @@ export async function snapshot() {
   const p = project(events);
   const statusOf = new Map(p.households.map((h) => [h.household, h]));
   const now = Date.now();
-  const households = Object.entries(reg.households).map(([id, h]) => {
-    const s = statusOf.get(id);
-    return {
-      id,
-      label: h.label,
-      lang: h.lang,
-      needs: h.needs.map((n) => ({ id: n, label: NEED_LABELS[n]?.en ?? n })),
-      status: s?.status ?? "unknown",
-      lastEventAt: s?.lastEventAt ? decodeHlc(s.lastEventAt).wall : null,
-      openIncident: s?.openIncident ?? null,
-    };
-  });
+  const households = withoutBroadcastHousehold(
+    Object.entries(reg.households).map(([id, h]) => {
+      const s = statusOf.get(id);
+      return {
+        id,
+        label: h.label,
+        lang: h.lang,
+        needs: h.needs.map((n) => ({ id: n, label: NEED_LABELS[n]?.en ?? n })),
+        status: s?.status ?? "unknown",
+        lastEventAt: s?.lastEventAt ? decodeHlc(s.lastEventAt).wall : null,
+        openIncident: s?.openIncident ?? null,
+      };
+    }),
+  );
   const { buddyWindowSec, streetWindowSec } = circleWindows();
   const labelOf = (id: string) => reg.households[id]?.label ?? id;
-  const incidents = p.incidents.map((i) => {
-    const openedAtMs = decodeHlc(i.openedAt).wall;
-    const buddyIds = (reg.households[i.household]?.buddies ?? []).filter((id) => reg.households[id]);
-    const tier = escalationTier({
-      incidentOpenedAt: openedAtMs,
-      acked: i.status !== "open",
-      now,
-      buddyWindowSec,
-      streetWindowSec,
-    });
-    return {
-      ...i,
-      label: labelOf(i.household),
-      openedAtMs,
-      waitMinutes: Math.max(0, Math.round((now - openedAtMs) / 60000)),
-      tier,
-      buddies: buddyIds.map((id) => ({ id, label: labelOf(id) })),
-      neighbourThread: buildNeighbourThread(i.replies, labelOf),
-    };
-  });
+  const incidents = withoutBroadcastHousehold(
+    p.incidents.map((i) => {
+      const openedAtMs = decodeHlc(i.openedAt).wall;
+      const buddyIds = (reg.households[i.household]?.buddies ?? []).filter((id) => reg.households[id]);
+      const tier = escalationTier({
+        incidentOpenedAt: openedAtMs,
+        acked: i.status !== "open",
+        now,
+        buddyWindowSec,
+        streetWindowSec,
+      });
+      return {
+        ...i,
+        label: labelOf(i.household),
+        openedAtMs,
+        waitMinutes: Math.max(0, Math.round((now - openedAtMs) / 60000)),
+        tier,
+        buddies: buddyIds.map((id) => ({ id, label: labelOf(id) })),
+        neighbourThread: buildNeighbourThread(i.replies, labelOf),
+      };
+    }),
+  );
   let tl: { source: string; buckets: TimelineBucket[] };
   let hold = { p50: 0, p95: 0, max: 0, n: 0 };
   if (dbEnabled()) {
@@ -364,6 +370,7 @@ export async function snapshot() {
   const cityId = cityIdentity().identity.id;
   const trail: Record<string, { id: string; kind: string; at: number; by: string; via: string | null; source: string; beacon: string | null; note: string | null }[]> = {};
   for (const e of events) {
+    if (!isStreetHousehold(e.household)) continue;
     const list = (trail[e.household] ??= []);
     let note: string | null = e.note ?? null;
     if (e.kind === "reply" && e.reply) {
@@ -387,16 +394,34 @@ export async function snapshot() {
   const lastHeardAt: Record<string, number | null> = {};
   for (const h of households) lastHeardAt[h.id] = h.lastEventAt;
   const silent = computeSilent({
-    households: Object.entries(reg.households).map(([id, h]) => ({ id, label: h.label, lang: h.lang, needs: h.needs })),
+    households: withoutBroadcastHousehold(
+      Object.entries(reg.households).map(([id, h]) => ({ id, label: h.label, lang: h.lang, needs: h.needs })),
+    ),
     lastHeardAt,
     emergencySince: c.emergencySince,
     now,
     thresholdMinutes,
   });
 
-  const cityNoticeIds = events.filter((e) => e.kind === "notice" && e.origin === cityId).map((e) => e.id);
+  const cityNoticeEvents = events
+    .filter((e) => e.kind === "notice" && e.origin === cityId && e.notice)
+    .sort((a, b) => decodeHlc(b.hlc).wall - decodeHlc(a.hlc).wall);
+  const cityNoticeIds = cityNoticeEvents.map((e) => e.id);
   const totalNodes = Math.max(Object.keys(reg.nodes).length, 1);
   const noticeDelivery = noticeReachStats(cityNoticeIds, c.noticeConfirmations, totalNodes);
+  const reachById = new Map(noticeDelivery.map((r) => [r.noticeId, r]));
+  const notices = cityNoticeEvents.map((e) => {
+    const reach = reachById.get(e.id);
+    return {
+      id: e.id,
+      en: e.notice!.en,
+      fr: e.notice!.fr,
+      severity: e.notice!.severity,
+      at: decodeHlc(e.hlc).wall,
+      reachedNodes: reach?.reachedNodes ?? 0,
+      totalNodes: reach?.totalNodes ?? totalNodes,
+    };
+  });
 
   return {
     generatedAt: now,
@@ -413,6 +438,7 @@ export async function snapshot() {
     timeline: tl,
     holdSeconds: hold,
     noticeDelivery,
+    notices,
   };
 }
 

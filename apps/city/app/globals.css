@@ -298,6 +298,24 @@ html { scroll-behavior: smooth; }
 .preflight-list strong { display: block; color: #ece6d9; }
 .preflight-list .section-sub { display: block; margin-top: 0.1rem; }
 
+.notices-panel {
+  position: absolute; z-index: 12; top: 64px; left: 392px; width: min(420px, calc(100% - 2rem));
+  display: grid; gap: 0.75rem; padding: 1rem 1.1rem; border-radius: 14px; max-height: calc(100% - 100px); overflow: auto;
+  background: rgba(10, 12, 30, 0.94); border: 1px solid rgba(236, 230, 217, 0.16); backdrop-filter: blur(14px);
+}
+.notice-field { display: grid; gap: 0.35rem; font-size: 0.875rem; color: #b3aec6; }
+.notice-field textarea {
+  width: 100%; min-height: 4.5rem; resize: vertical; padding: 0.55rem 0.65rem; border-radius: 10px;
+  border: 1px solid rgba(236, 230, 217, 0.18); background: rgba(28, 33, 64, 0.7); color: #ece6d9; font: inherit;
+}
+.notice-count { justify-self: end; font-size: 0.75rem; color: #8a849c; }
+.notice-severity { border: none; margin: 0; padding: 0; display: flex; gap: 1rem; color: #ece6d9; font-size: 0.875rem; }
+.notice-severity legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.notice-sent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.65rem; }
+.notice-sent-list li { padding: 0.55rem 0.65rem; border-radius: 10px; background: rgba(28, 33, 64, 0.65); display: grid; gap: 0.3rem; }
+.notice-sent-list li[data-severity="urgent"] { border: 1px solid rgba(255, 106, 85, 0.4); }
+.notice-sent-en { margin: 0; color: #ece6d9; font-size: 0.9rem; }
+
 .demo-reset-dialog {
   position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%);
   display: grid; gap: 0.9rem; width: min(420px, calc(100% - 2rem)); padding: 1.25rem 1.4rem; border-radius: 16px;

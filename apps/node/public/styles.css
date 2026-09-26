@@ -228,6 +228,30 @@ button, input { font: inherit; color: inherit; }
 .reply-ago { color: #8a849c; }
 .empty { margin-top: 0.75rem; color: #b8b3c9; }
 
+.city-notices {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.75rem 1.25rem 0;
+}
+.city-notice {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: rgba(158, 197, 255, 0.12);
+  border: 1px solid rgba(158, 197, 255, 0.35);
+}
+.city-notice[data-severity="urgent"] {
+  background: rgba(255, 106, 85, 0.14);
+  border-color: rgba(255, 106, 85, 0.45);
+}
+.city-notice-kicker { margin: 0; font-weight: 700; color: #9ec5ff; font-size: 0.85rem; }
+.city-notice[data-severity="urgent"] .city-notice-kicker { color: #ff6a55; }
+.city-notice-en { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.city-notice-fr { margin: 0; color: #b8b3c9; font-size: 0.95rem; }
+.city-notice-meta { margin: 0; color: #8a849c; font-size: 0.8rem; }
+.btn-small { min-height: 36px; padding: 0 0.85rem; font-size: 0.85rem; }
+
 /* Beacon + network */
 .beacon, .network, .alerts { border-top: 1px solid rgba(236, 230, 217, 0.12); padding-top: 1.5rem; }
 .beacon-status { margin: 0.5rem 0 1rem; color: #b8b3c9; }

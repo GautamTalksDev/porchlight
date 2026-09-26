@@ -47,7 +47,10 @@ const $ = (sel) => document.querySelector(sel);
 let state = null;
 let firstRender = true;
 const seenIncidents = new Set();
+const seenNotices = new Set();
+const dismissedNotices = new Set();
 const beacon = { mode: null, beaconId: null, device: null, ackChar: null, serialWriter: null };
+let noticeAudio = null;
 
 // Helpers
 
@@ -155,6 +158,100 @@ function speak(key, lang = "en") {
   // Prefer the pre-recorded ElevenLabs clip (works offline); fall back to the OS voice.
   if (clips[lang]?.includes(key)) new Audio(`/audio/${lang}/${key}.mp3`).play().catch(fallback);
   else fallback();
+}
+
+function playNoticeChime() {
+  try {
+    noticeAudio ??= new AudioContext();
+    const ctx = noticeAudio;
+    if (ctx.state === "suspended") void ctx.resume();
+    const t = ctx.currentTime;
+    for (const [freq, at] of [
+      [660, 0],
+      [880, 0.14],
+    ]) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t + at);
+      g.gain.exponentialRampToValueAtTime(0.12, t + at + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.55);
+      o.connect(g).connect(ctx.destination);
+      o.start(t + at);
+      o.stop(t + at + 0.6);
+    }
+  } catch {
+    /* no audio */
+  }
+}
+
+function pickVoice(langPrefix) {
+  const voices = window.speechSynthesis?.getVoices?.() ?? [];
+  return (
+    voices.find((v) => v.lang?.toLowerCase().startsWith(langPrefix)) ||
+    voices.find((v) => v.lang?.toLowerCase().startsWith(langPrefix.slice(0, 2))) ||
+    null
+  );
+}
+
+function readNoticeAloud(n) {
+  if (!("speechSynthesis" in window)) {
+    toast("Speech is not available in this browser.", "error");
+    return;
+  }
+  speechSynthesis.cancel();
+  const en = new SpeechSynthesisUtterance(n.en);
+  en.lang = "en-CA";
+  const enVoice = pickVoice("en-ca") || pickVoice("en");
+  if (enVoice) en.voice = enVoice;
+  const fr = new SpeechSynthesisUtterance(n.fr);
+  fr.lang = "fr-CA";
+  const frVoice = pickVoice("fr-ca") || pickVoice("fr");
+  if (frVoice) fr.voice = frVoice;
+  en.onend = () => speechSynthesis.speak(fr);
+  speechSynthesis.speak(en);
+}
+
+function renderNotices(notices) {
+  const root = $("#city-notices");
+  if (!root) return;
+  const list = (notices ?? []).filter((n) => !dismissedNotices.has(n.id)).slice(0, 3);
+  root.replaceChildren(
+    ...list.map((n) =>
+      el(
+        "article",
+        { class: "city-notice", dataset: { severity: n.severity } },
+        el("p", { class: "city-notice-kicker" }, "Notice from the City"),
+        el("p", { class: "city-notice-en" }, n.en),
+        el("p", { class: "city-notice-fr" }, n.fr),
+        el("p", { class: "city-notice-meta" }, `${ago(n.at)} · ${n.severity === "urgent" ? "Urgent" : "Information"}`),
+        el(
+          "div",
+          { class: "row" },
+          el("button", { class: "btn btn-quiet btn-small", type: "button", onclick: () => readNoticeAloud(n) }, "Read aloud"),
+          el(
+            "button",
+            {
+              class: "btn btn-quiet btn-small",
+              type: "button",
+              onclick: () => {
+                dismissedNotices.add(n.id);
+                if (state) renderNotices(state.notices);
+              },
+            },
+            "Dismiss",
+          ),
+        ),
+      ),
+    ),
+  );
+  for (const n of notices ?? []) {
+    if (!seenNotices.has(n.id)) {
+      seenNotices.add(n.id);
+      if (!firstRender) playNoticeChime();
+    }
+  }
 }
 
 // Rendering
@@ -383,6 +480,7 @@ function render(s) {
   if (home) home.textContent = s.node.householdLabel ? `This node: ${s.node.householdLabel}` : "This node: not assigned";
   renderUplink(s.uplink);
   renderStreet(s.households);
+  renderNotices(s.notices);
   renderAlerts(s.incidents);
   renderPeers(s.peers);
   renderLog(s.recent);

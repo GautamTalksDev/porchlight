@@ -168,11 +168,11 @@ You are Porchlight, the voice assistant for a city emergency coordinator during 
 
 **Languages:** English.
 
-**Client tools.** Add eight tools of type *client*, and turn on waiting for a response:
+**Client tools.** Add ten tools of type *client*, and turn on waiting for a response:
 
 | Tool | Parameters | Description to give the agent |
 | - | - | - |
-| `get_overview` | (none) | Spoken summary of open calls, silent homes, and link state |
+| `get_overview` | (none) | Spoken summary of open calls, silent homes, notices, and link state |
 | `get_household` | `address` (string) | Status, needs, language, wait or silence, and how the latest call arrived |
 | `dispatch` | `address` (string) | Same as Dispatch a neighbour (ack). Says already on the way when appropriate |
 | `mark_safe` | `address` (string) | Same as Mark safe. Use only when the coordinator explicitly asks |
@@ -180,6 +180,8 @@ You are Porchlight, the voice assistant for a city emergency coordinator during 
 | `start_check_in` | `address` (string) | Ends the copilot and starts the resident voice call for that home |
 | `set_emergency` | `active` (boolean) | Declare or end the emergency clock used for silence checks |
 | `set_outage` | `active` (boolean) | Simulate or end the city outage |
+| `draft_notice` | `text` (string) | Opens Notices, fills English, drafts French. Asks for hand typed French if Gemini fails |
+| `send_notice` | (none) | Sends the current draft only when English and French are both filled |
 
 **Security:** turn on authentication, so the agent can only be opened with a signed URL from our server. Allow **overrides** for the first message.
 

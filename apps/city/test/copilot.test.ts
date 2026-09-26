@@ -87,4 +87,23 @@ describe("buildOverview", () => {
     });
     assert.match(text, /No neighbour has answered at 12 Maple Crescent/);
   });
+
+  it("mentions the latest notice and how many nodes it reached", () => {
+    const text = buildOverview({
+      counts: { help: 0, acknowledged: 0, ok: 1, unknown: 0 },
+      queue: [],
+      silent: [],
+      outage: false,
+      emergencySince: null,
+      nodesReporting: 3,
+      nodesTotal: 3,
+      latestNotice: {
+        en: "Warming centre at Heron Road is open until midnight.",
+        reachedNodes: 3,
+        totalNodes: 3,
+      },
+    });
+    assert.match(text, /Warming centre at Heron Road/);
+    assert.match(text, /Reached 3 of 3 nodes/);
+  });
 });

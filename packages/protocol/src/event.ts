@@ -12,6 +12,11 @@ export const MAX_NOTICE_EN_LENGTH = 280;
 export const MAX_NOTICE_FR_LENGTH = 320;
 /** Household slug used for city-wide notices (and later city alive pings). */
 export const CITY_BROADCAST_HOUSEHOLD = "city-hall";
+
+/** True for real homes on the street; false for the city broadcast slug. */
+export function isStreetHousehold(id: string): boolean {
+  return id !== CITY_BROADCAST_HOUSEHOLD;
+}
 /** Reject events stamped further in the future than this. Offline clocks drift, so be generous but bounded. */
 export const DEFAULT_MAX_FUTURE_SKEW_MS = 15 * 60 * 1000;
 
