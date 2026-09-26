@@ -44,6 +44,7 @@ describe("three nodes and a city", () => {
       const config = loadConfig(
         {
           NODE_NAME: `node-${i}`,
+          NODE_HOUSEHOLD: ["hh-oak-19", "hh-birch-4", "hh-cedar-31"][i],
           PORT: String(tmp[i]),
           DATA_DIR: "/tmp/unused",
           PEERS: tmp.filter((_, j) => j !== i).map((p) => `http://127.0.0.1:${p}`).join(","),
@@ -53,6 +54,8 @@ describe("three nodes and a city", () => {
           GOSSIP_INTERVAL_MS: "200",
           UPLINK_INTERVAL_MS: "500",
           HOUSEHOLDS_FILE: new URL("../../../config/households.json", import.meta.url).pathname,
+          BUDDY_WINDOW_SEC: "30",
+          STREET_WINDOW_SEC: "30",
         },
       );
       const agent = new NodeAgent(config, generateIdentity(), { persist: false });
@@ -148,12 +151,26 @@ describe("three nodes and a city", () => {
     assert.equal(inc.status, "open");
   });
 
+  it("a neighbour reply reaches another node by gossip", async () => {
+    await new Promise((r) => setTimeout(r, 900));
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 8));
+    const res = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -50 });
+    assert.equal(res.status, 200);
+    const key = "pl-b01:00001234:8";
+    await until(() => nodes.every((n) => n.agent.state().incidents.some((i) => i.key === key)));
+    const replyRes = await post(nodes[1]!, "/api/reply", { incident: key, reply: "generator", note: "Ready" });
+    assert.equal(replyRes.status, 200);
+    await until(() =>
+      nodes[2]!.agent.state().incidents.some((i) => i.key === key && i.replies.some((r) => r.reply === "generator" && r.actor === "hh-birch-4")),
+    );
+  });
+
   it("a city-signed ack on uplink reaches the node and then neighbours by gossip", async () => {
     await new Promise((r) => setTimeout(r, 900));
-    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 6));
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 9));
     const res = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -55 });
     assert.equal(res.status, 200);
-    const incidentKey = "pl-b01:00001234:6";
+    const incidentKey = "pl-b01:00001234:9";
     await until(() => city.store.all().some((e) => e.kind === "help" && e.incident === incidentKey));
     const help = city.store.all().find((e) => e.kind === "help" && e.incident === incidentKey)!;
     const ack = createEvent(city.identity, city.clock, {
@@ -170,10 +187,10 @@ describe("three nodes and a city", () => {
 
   it("an ack for a beacon incident that arrives by gossip publishes beacon-ack once", async () => {
     await new Promise((r) => setTimeout(r, 900));
-    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 7));
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 10));
     const res = await post(nodes[1]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -52 });
     assert.equal(res.status, 200);
-    const incidentKey = "pl-b01:00001234:7";
+    const incidentKey = "pl-b01:00001234:10";
     await until(() => nodes[0]!.agent.state().incidents.some((i) => i.key === incidentKey));
     const help = nodes[0]!.agent.store.all().find((e) => e.kind === "help" && e.incident === incidentKey)!;
     const pubs: { beaconId: string; frame: string; incident: string }[] = [];

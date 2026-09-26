@@ -7,3 +7,4 @@ export * from "./sync";
 export * from "./siphash";
 export * from "./beacon";
 export * from "./project";
+export * from "./escalation";

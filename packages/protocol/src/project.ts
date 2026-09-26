@@ -1,8 +1,17 @@
 import { compareHlc } from "./hlc";
-import type { SignedEvent } from "./event";
+import type { ReplyCode, SignedEvent } from "./event";
 
 export type IncidentStatus = "open" | "acknowledged" | "resolved";
 export type HouseholdStatus = "unknown" | "ok" | "help" | "acknowledged";
+
+export interface IncidentReply {
+  id: string;
+  at: string;
+  origin: string;
+  actor: string;
+  reply: ReplyCode;
+  note?: string;
+}
 
 export interface Incident {
   key: string;
@@ -18,6 +27,7 @@ export interface Incident {
   resolvedAt?: string;
   lang?: "en" | "fr";
   note?: string;
+  replies: IncidentReply[];
 }
 
 export interface HouseholdView {
@@ -64,6 +74,7 @@ export function project(events: readonly SignedEvent[]): Projection {
             witnesses: [],
             lang: ev.lang,
             note: ev.note,
+            replies: [],
           };
           incidents.set(key, inc);
         }
@@ -103,6 +114,26 @@ export function project(events: readonly SignedEvent[]): Projection {
       case "note":
         hh(ev.household, ev.hlc);
         break;
+      case "reply": {
+        const inc =
+          byEventId.get(ev.ref!) ??
+          (ev.incident ? incidents.get(ev.incident) : undefined) ??
+          [...incidents.values()].find((i) => i.eventId === ev.ref);
+        hh(ev.household, ev.hlc);
+        if (inc && ev.reply && ev.actor) {
+          if (!inc.replies.some((r) => r.id === ev.id)) {
+            inc.replies.push({
+              id: ev.id,
+              at: ev.hlc,
+              origin: ev.origin,
+              actor: ev.actor,
+              reply: ev.reply,
+              note: ev.note,
+            });
+          }
+        }
+        break;
+      }
     }
   }
 

@@ -39,8 +39,13 @@ if (realCity) {
   });
 }
 
-const names = ["node-a", "node-b", "node-c"];
+const names = ["node-a", "node-b", "node-c"] as const;
 const ports = [7401, 7402, 7403];
+const nodeHomes: Record<(typeof names)[number], string> = {
+  "node-a": "hh-oak-19",
+  "node-b": "hh-birch-4",
+  "node-c": "hh-cedar-31",
+};
 const agents: NodeAgent[] = [];
 names.forEach((name, i) => {
   const peers = ports.filter((_, j) => j !== i).map((p) => `http://127.0.0.1:${p}`).join(",");
@@ -48,6 +53,7 @@ names.forEach((name, i) => {
     {
       ...process.env,
       NODE_NAME: name,
+      NODE_HOUSEHOLD: nodeHomes[name],
       PORT: String(ports[i]),
       HOST: "127.0.0.1",
       DATA_DIR: join(base, name),

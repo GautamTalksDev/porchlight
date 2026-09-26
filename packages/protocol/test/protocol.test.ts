@@ -14,6 +14,7 @@ import {
   decodeFrame,
   deserializeIdentity,
   encodeFrame,
+  escalationTier,
   generateIdentity,
   handleExchange,
   handlePull,
@@ -208,5 +209,82 @@ describe("projection", () => {
     p = project([ok, ack, h2, h1]);
     assert.equal(p.incidents[0]!.status, "resolved");
     assert.equal(p.households[0]!.status, "ok");
+  });
+
+  it("collects neighbour replies on an incident", () => {
+    const n1 = generateIdentity();
+    const n2 = generateIdentity();
+    let t = 1_700_000_000_000;
+    const c1 = new HybridClock(n1.id, () => t);
+    const c2 = new HybridClock(n2.id, () => t);
+    const help = createEvent(n1, c1, {
+      kind: "help",
+      household: "hh-maple-12",
+      incident: "pl-b01:00000002:1",
+      source: { type: "beacon", beacon: "pl-b01" },
+    });
+    t += 5;
+    const reply = createEvent(n2, c2, {
+      kind: "reply",
+      household: "hh-maple-12",
+      incident: "pl-b01:00000002:1",
+      ref: help.id,
+      actor: "hh-oak-19",
+      reply: "generator",
+      note: "Running now",
+      source: { type: "console" },
+    });
+    const p = project([help, reply]);
+    assert.equal(p.incidents[0]!.replies.length, 1);
+    assert.equal(p.incidents[0]!.replies[0]!.reply, "generator");
+    assert.equal(p.incidents[0]!.replies[0]!.actor, "hh-oak-19");
+  });
+});
+
+describe("escalationTier", () => {
+  it("moves from buddies to street to city, and clears when acknowledged", () => {
+    const opened = 1_000_000;
+    assert.equal(
+      escalationTier({ incidentOpenedAt: opened, acked: false, now: opened + 100_000, buddyWindowSec: 300, streetWindowSec: 300 }),
+      "buddies",
+    );
+    assert.equal(
+      escalationTier({ incidentOpenedAt: opened, acked: false, now: opened + 400_000, buddyWindowSec: 300, streetWindowSec: 300 }),
+      "street",
+    );
+    assert.equal(
+      escalationTier({ incidentOpenedAt: opened, acked: false, now: opened + 700_000, buddyWindowSec: 300, streetWindowSec: 300 }),
+      "city",
+    );
+    assert.equal(
+      escalationTier({ incidentOpenedAt: opened, acked: true, now: opened + 100_000, buddyWindowSec: 300, streetWindowSec: 300 }),
+      null,
+    );
+  });
+});
+
+describe("reply events", () => {
+  it("rejects over-long reply text", () => {
+    const me = generateIdentity();
+    const clock = new HybridClock(me.id);
+    const help = createEvent(me, clock, {
+      kind: "help",
+      household: "hh-maple-12",
+      incident: "x:1:1",
+      source: { type: "console" },
+    });
+    assert.throws(
+      () =>
+        createEvent(me, clock, {
+          kind: "reply",
+          household: "hh-maple-12",
+          ref: help.id,
+          actor: "hh-oak-19",
+          reply: "omw",
+          note: "x".repeat(141),
+          source: { type: "console" },
+        }),
+      /at most 140/,
+    );
   });
 });

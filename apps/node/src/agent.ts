@@ -7,15 +7,18 @@ import {
   HybridClock,
   JsonlFileAdapter,
   MemoryAdapter,
+  REPLY_LABELS,
   bytesToHex,
   createEvent,
   decodeFrame,
   decodeHlc,
   encodeFrame,
+  escalationTier,
   hexToBytes,
   project,
   syncWith,
   type NodeIdentity,
+  type ReplyCode,
   type SignedEvent,
 } from "@porchlight/protocol";
 import type { NodeConfig } from "./config";
@@ -294,6 +297,39 @@ export class NodeAgent {
     return { event: ev, ackFrame: built?.frame };
   }
 
+  /**
+   * A neighbour's quick reply on the mesh (Porch Circles). "On my way" also writes the normal ack
+   * so the beacon turns green.
+   */
+  reply(
+    incidentKey: string,
+    code: ReplyCode,
+    text?: string,
+  ): { reply: SignedEvent; ack?: SignedEvent; ackFrame?: string } {
+    const actor = this.config.household;
+    if (!actor) throw new Error("NODE_HOUSEHOLD is not set on this node");
+    const inc = project(this.store.all()).incidents.find((i) => i.key === incidentKey);
+    if (!inc) throw new Error("unknown incident");
+    if (inc.status === "resolved") throw new Error("incident already resolved");
+    const note = text?.trim() || undefined;
+    const replyEv = createEvent(this.identity, this.clock, {
+      kind: "reply",
+      household: inc.household,
+      incident: inc.key,
+      ref: inc.eventId,
+      actor,
+      reply: code,
+      note,
+      source: { type: "console" },
+    });
+    this.store.add(replyEv);
+    if (code === "omw" && inc.status === "open") {
+      const ack = this.acknowledge(incidentKey);
+      return { reply: replyEv, ack: ack.event, ackFrame: ack.ackFrame };
+    }
+    return { reply: replyEv };
+  }
+
   setUplinkCut(cut: boolean): void {
     if (!this.config.cityUrl) return;
     this.uplinkMode = cut ? "cut" : "connecting";
@@ -427,15 +463,36 @@ export class NodeAgent {
     const events = this.store.all();
     const p = project(events);
     const label = (h: string) => this.config.households.households[h]?.label ?? h;
+    const now = Date.now();
+    const myHome = this.config.household;
     const known = new Set(p.households.map((h) => h.household));
     const households = [
       ...p.households,
       ...Object.keys(this.config.households.households)
         .filter((h) => !known.has(h))
         .map((h) => ({ household: h, status: "unknown" as const, lastEventAt: "" })),
-    ].map((h) => ({ ...h, label: label(h.household), lang: this.langFor(h.household) }));
+    ].map((h) => {
+      const info = this.config.households.households[h.household];
+      return {
+        ...h,
+        label: label(h.household),
+        lang: this.langFor(h.household),
+        buddies: info?.buddies ?? [],
+      };
+    });
     return {
-      node: { id: this.identity.id, name: this.config.name, pub: this.identity.pub, startedAt: this.startedAt },
+      node: {
+        id: this.identity.id,
+        name: this.config.name,
+        pub: this.identity.pub,
+        startedAt: this.startedAt,
+        household: myHome ?? null,
+        householdLabel: myHome ? label(myHome) : null,
+      },
+      circles: {
+        buddyWindowSec: this.config.buddyWindowSec,
+        streetWindowSec: this.config.streetWindowSec,
+      },
       uplink: {
         mode: this.uplinkMode,
         cityUrl: this.config.cityUrl ?? null,
@@ -449,7 +506,31 @@ export class NodeAgent {
       counts: { events: events.length, rejected: this.store.rejected },
       beacons: [...this.beacons.values()].map((b) => ({ ...b, label: b.household ? label(b.household) : undefined })),
       households,
-      incidents: p.incidents.map((i) => ({ ...i, label: label(i.household) })),
+      incidents: p.incidents.map((i) => {
+        const openedAtMs = decodeHlc(i.openedAt).wall;
+        const tier = escalationTier({
+          incidentOpenedAt: openedAtMs,
+          acked: i.status !== "open",
+          now,
+          buddyWindowSec: this.config.buddyWindowSec,
+          streetWindowSec: this.config.streetWindowSec,
+        });
+        const buddies = this.config.households.households[i.household]?.buddies ?? [];
+        const isBuddy = Boolean(myHome && buddies.includes(myHome));
+        return {
+          ...i,
+          label: label(i.household),
+          openedAtMs,
+          tier,
+          isBuddy,
+          replies: i.replies.map((r) => ({
+            ...r,
+            atMs: decodeHlc(r.at).wall,
+            actorLabel: label(r.actor),
+            replyLabel: REPLY_LABELS[r.reply],
+          })),
+        };
+      }),
       recent: events.slice(-40).reverse().map((e) => ({
         id: e.id,
         kind: e.kind,

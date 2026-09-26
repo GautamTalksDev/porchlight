@@ -50,6 +50,11 @@ const CheckinBody = z.strictObject({
   note: z.string().max(280).optional(),
 });
 const AckBody = z.strictObject({ incident: z.string().regex(/^[a-z0-9:-]{3,96}$/) });
+const ReplyBody = z.strictObject({
+  incident: z.string().regex(/^[a-z0-9:-]{3,96}$/),
+  reply: z.enum(["omw", "cant", "generator", "blocked"]),
+  note: z.string().max(140).optional(),
+});
 const UplinkBody = z.strictObject({ cut: z.boolean() });
 const ChaosBody = z.strictObject({ drop: z.number().min(0).max(0.95) });
 const DevBeaconBody = z.strictObject({ beaconId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/), kind: z.enum(["help", "ok", "test", "fall"]) });
@@ -205,6 +210,20 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
             return sendJson(res, 200, { ok: true, eventId: r.event.id, ackFrame: r.ackFrame ?? null });
           } catch (err) {
             throw new HttpError(404, (err as Error).message);
+          }
+        }
+        case "/api/reply": {
+          const b = parseWith(ReplyBody, body);
+          try {
+            const r = agent.reply(b.incident, b.reply, b.note);
+            return sendJson(res, 200, {
+              ok: true,
+              eventId: r.reply.id,
+              ackEventId: r.ack?.id ?? null,
+              ackFrame: r.ackFrame ?? null,
+            });
+          } catch (err) {
+            throw new HttpError(400, (err as Error).message);
           }
         }
         case "/api/uplink":

@@ -7,7 +7,12 @@ export { NEED_LABELS } from "./needs";
 const Registry = z.object({
   households: z.record(
     z.string(),
-    z.object({ label: z.string(), lang: z.enum(["en", "fr"]), needs: z.array(z.string()).default([]) }),
+    z.object({
+      label: z.string(),
+      lang: z.enum(["en", "fr"]),
+      needs: z.array(z.string()).default([]),
+      buddies: z.array(z.string()).default([]),
+    }),
   ),
   nodes: z.record(z.string(), z.string()).default({}),
 });

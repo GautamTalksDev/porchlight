@@ -1,18 +1,48 @@
 {
   "note": "Fictional demo data. Real deployments keep this registry only on the city server, never on neighbourhood nodes.",
   "households": {
-    "hh-maple-12": { "label": "12 Maple Crescent", "lang": "en", "needs": ["oxygen-concentrator", "lives-alone", "age-90-plus"] },
-    "hh-birch-4": { "label": "4 Birch Lane", "lang": "en", "needs": ["infant"] },
+    "hh-maple-12": {
+      "label": "12 Maple Crescent",
+      "lang": "en",
+      "needs": ["oxygen-concentrator", "lives-alone", "age-90-plus"],
+      "buddies": ["hh-oak-19", "hh-birch-4"]
+    },
+    "hh-birch-4": {
+      "label": "4 Birch Lane",
+      "lang": "en",
+      "needs": ["infant"],
+      "buddies": ["hh-cedar-31", "hh-maple-12"]
+    },
     "hh-cedar-31": { "label": "31 Cedar Row", "lang": "en", "needs": [] },
-    "hh-elm-7": { "label": "7 Elm Court", "lang": "fr", "needs": ["mobility-aid", "lives-alone"] },
-    "hh-oak-19": { "label": "19 Oak Terrace", "lang": "en", "needs": ["hearing-impaired"] },
-    "hh-pine-2": { "label": "2 Pine Walk", "lang": "en", "needs": ["dialysis-at-home"] },
+    "hh-elm-7": {
+      "label": "7 Elm Court",
+      "lang": "fr",
+      "needs": ["mobility-aid", "lives-alone"],
+      "buddies": ["hh-oak-19", "hh-pine-2"]
+    },
+    "hh-oak-19": {
+      "label": "19 Oak Terrace",
+      "lang": "en",
+      "needs": ["hearing-impaired"],
+      "buddies": ["hh-maple-12", "hh-elm-7"]
+    },
+    "hh-pine-2": {
+      "label": "2 Pine Walk",
+      "lang": "en",
+      "needs": ["dialysis-at-home"],
+      "buddies": ["hh-elm-7", "hh-willow-9"]
+    },
     "hh-spruce-45": { "label": "45 Spruce Way", "lang": "fr", "needs": [] },
-    "hh-willow-9": { "label": "9 Willow Bend", "lang": "en", "needs": ["insulin-refrigeration"] }
+    "hh-willow-9": {
+      "label": "9 Willow Bend",
+      "lang": "en",
+      "needs": ["insulin-refrigeration"],
+      "buddies": ["hh-pine-2", "hh-spruce-45"]
+    }
   },
   "nodes": {
-    "node-a": "hh-birch-4",
-    "node-b": "hh-cedar-31",
-    "node-c": "hh-oak-19"
+    "node-a": "hh-oak-19",
+    "node-b": "hh-birch-4",
+    "node-c": "hh-cedar-31"
   }
 }

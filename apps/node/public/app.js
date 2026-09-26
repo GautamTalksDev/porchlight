@@ -28,6 +28,13 @@ const PHRASES = {
   },
 };
 
+const REPLY_BUTTONS = [
+  { code: "omw", label: "On my way", className: "btn btn-ack" },
+  { code: "cant", label: "Can't go", className: "btn btn-quiet" },
+  { code: "generator", label: "I have a generator", className: "btn btn-quiet" },
+  { code: "blocked", label: "Road blocked", className: "btn btn-quiet" },
+];
+
 const STATUS_TEXT = {
   unknown: "Not heard from",
   ok: "Safe",
@@ -230,6 +237,34 @@ function collapseAlerts(incidents) {
   }));
 }
 
+function circleBanner(i) {
+  if (i.tier === "buddies" && i.isBuddy) {
+    return el("p", { class: "circle-banner circle-buddy" }, `You're a buddy for ${i.label}. They need you.`);
+  }
+  if (i.tier === "street") {
+    const n = state?.circles?.buddyWindowSec ?? 300;
+    return el("p", { class: "circle-banner circle-street" }, `No buddy has answered in ${n} s. Can anyone go?`);
+  }
+  return el("p", { class: "circle-quiet" }, "Buddies alerted");
+}
+
+function replyThread(replies) {
+  if (!replies?.length) return null;
+  return el(
+    "ul",
+    { class: "reply-thread" },
+    ...replies.map((r) =>
+      el(
+        "li",
+        {},
+        el("strong", {}, r.actorLabel),
+        el("span", {}, ` ${r.replyLabel}${r.note ? `: ${r.note}` : ""}`),
+        el("span", { class: "reply-ago" }, ` · ${ago(r.atMs)}`),
+      ),
+    ),
+  );
+}
+
 function renderAlerts(incidents) {
   const cards = collapseAlerts(incidents);
   $("#alerts-empty").hidden = cards.length > 0;
@@ -237,15 +272,24 @@ function renderAlerts(incidents) {
     ...cards.map((i) => {
       const heard = i.witnesses.length === 1 ? "Heard by 1 node" : `Heard by ${i.witnesses.length} nodes`;
       const acked = i.status === "acknowledged";
+      const openedMs = i.openedAtMs ?? hlcWall(i.openedAt);
       return el(
         "li",
-        { class: "alert", dataset: { status: i.status } },
+        { class: "alert", dataset: { status: i.status, tier: i.tier ?? "" } },
+        circleBanner(i),
         el("p", { class: "alert-title" }, i.label),
-        el("p", { class: "alert-meta" }, `${acked ? "A neighbour is on the way." : "Waiting for a neighbour."} ${heard}, ${ago(hlcWall(i.openedAt))}.`),
+        el("p", { class: "alert-meta" }, `${acked ? "A neighbour is on the way." : "Waiting for a neighbour."} ${heard}, ${ago(openedMs)}.`),
         i.showFall ? el("p", {}, "Possible fall, no button pressed") : i.note && i.note !== FALL_NOTE ? el("p", {}, i.note) : null,
         acked
           ? null
-          : el("div", { class: "row" }, el("button", { class: "btn btn-ack", type: "button", onclick: () => acknowledge(i) }, "I'm on my way")),
+          : el(
+              "div",
+              { class: "row reply-row" },
+              ...REPLY_BUTTONS.map((b) =>
+                el("button", { class: b.className, type: "button", onclick: () => sendReply(i, b.code) }, b.label),
+              ),
+            ),
+        replyThread(i.replies),
       );
     }),
   );
@@ -254,7 +298,10 @@ function renderAlerts(incidents) {
   for (const i of cards) {
     if (!seenIncidents.has(i.key)) {
       seenIncidents.add(i.key);
-      if (!firstRender && !i.witnesses.includes(state.node.id)) speak("neighbour-alert", state.households.find((h) => h.household === i.household)?.lang);
+      if (!firstRender && !i.witnesses.includes(state.node.id)) {
+        const lang = state.households.find((h) => h.household === i.household)?.lang;
+        speak("neighbour-alert", lang);
+      }
     }
   }
 }
@@ -295,6 +342,8 @@ function renderLog(recent) {
 function render(s) {
   state = s;
   $("#node-id").textContent = s.node.id.slice(0, 8);
+  const home = $("#node-home");
+  if (home) home.textContent = s.node.householdLabel ? `This node: ${s.node.householdLabel}` : "This node: not assigned";
   renderUplink(s.uplink);
   renderStreet(s.households);
   renderAlerts(s.incidents);
@@ -329,17 +378,22 @@ $("#house-sheet").addEventListener("close", async () => {
   }
 });
 
-async function acknowledge(card) {
+async function sendReply(card, code) {
   const keys = card.openKeys?.length ? card.openKeys : [card.key];
   try {
     for (const key of keys) {
-      const r = await api("/api/ack", { incident: key });
+      const r = await api("/api/reply", { incident: key, reply: code });
       if (r.ackFrame && beacon.beaconId && key.startsWith(`${beacon.beaconId}:`)) await sendAck(r.ackFrame);
     }
-    toast(`You're on your way to ${card.label}`);
+    const label = REPLY_BUTTONS.find((b) => b.code === code)?.label ?? code;
+    toast(`${label}: ${card.label}`);
   } catch (err) {
     toast(err.message, "error");
   }
+}
+
+async function acknowledge(card) {
+  return sendReply(card, "omw");
 }
 
 $("#uplink-toggle").addEventListener("click", async () => {

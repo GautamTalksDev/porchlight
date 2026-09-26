@@ -9,6 +9,8 @@ const bool = z
 
 const EnvSchema = z.object({
   NODE_NAME: z.string().regex(/^[a-z0-9-]{2,32}$/).default("node-a"),
+  /** Household this node sits in (Porch Circles buddy matching). */
+  NODE_HOUSEHOLD: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/).optional().or(z.literal("").transform(() => undefined)),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65535).default(7401),
   DATA_DIR: z.string().default("./data"),
@@ -26,24 +28,34 @@ const EnvSchema = z.object({
   UI_PUBLIC: bool,
   DEV_SIMULATE_BEACON: bool,
   DEFAULT_LANG: z.enum(["en", "fr"]).default("en"),
+  /** Seconds before a call escalates from buddies to the whole street. Use 30 for demos. */
+  BUDDY_WINDOW_SEC: z.coerce.number().int().min(1).default(300),
+  /** Seconds the street window lasts before the city tier. Use 30 for demos. */
+  STREET_WINDOW_SEC: z.coerce.number().int().min(1).default(300),
 });
 
 export interface HouseholdInfo {
   label: string;
   lang: "en" | "fr";
+  buddies: string[];
 }
 
 export const RosterFile = z.object({
   beacons: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/), z.object({ household: z.string() })),
   households: z.record(
     z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/),
-    z.object({ label: z.string().max(80), lang: z.enum(["en", "fr"]).default("en") }),
+    z.object({
+      label: z.string().max(80),
+      lang: z.enum(["en", "fr"]).default("en"),
+      buddies: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/)).default([]),
+    }),
   ),
 });
 export type RosterFile = z.infer<typeof RosterFile>;
 
 export interface NodeConfig {
   name: string;
+  household?: string;
   host: string;
   port: number;
   dataDir: string;
@@ -61,6 +73,8 @@ export interface NodeConfig {
   uiPublic: boolean;
   devSimulateBeacon: boolean;
   defaultLang: "en" | "fr";
+  buddyWindowSec: number;
+  streetWindowSec: number;
 }
 
 export function parseBeaconKeys(spec: string): Map<string, Uint8Array> {
@@ -84,9 +98,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
   if (e.CITY_URL && !e.CITY_INGEST_TOKEN) {
     throw new Error("CITY_URL is set but CITY_INGEST_TOKEN is empty. Uplink needs a token.");
   }
+  if (e.NODE_HOUSEHOLD && !households.households[e.NODE_HOUSEHOLD]) {
+    throw new Error(`NODE_HOUSEHOLD "${e.NODE_HOUSEHOLD}" is not in HOUSEHOLDS_FILE`);
+  }
   const roster = e.ROSTER.split(",").map((s) => s.trim()).filter(Boolean);
   return {
     name: e.NODE_NAME,
+    household: e.NODE_HOUSEHOLD,
     host: e.HOST,
     port: e.PORT,
     dataDir: e.DATA_DIR,
@@ -104,6 +122,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     uiPublic: e.UI_PUBLIC,
     devSimulateBeacon: e.DEV_SIMULATE_BEACON,
     defaultLang: e.DEFAULT_LANG,
+    buddyWindowSec: e.BUDDY_WINDOW_SEC,
+    streetWindowSec: e.STREET_WINDOW_SEC,
     ...overrides,
   };
 }

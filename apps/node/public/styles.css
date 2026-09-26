@@ -76,6 +76,7 @@ button, input { font: inherit; color: inherit; }
 .brand-door { fill: #f2b35e; }
 .brand-name { font-size: 1.25rem; font-weight: 800; }
 .brand-node { font-size: 0.875rem; color: #b8b3c9; }
+.brand-home { font-size: 0.875rem; color: #ece6d9; margin-top: 0.15rem; }
 .brand-node .mono { opacity: 0.75; }
 
 .link {
@@ -213,6 +214,17 @@ button, input { font: inherit; color: inherit; }
 .alert[data-status="acknowledged"] { border-color: #9ec5ff; background: rgba(158, 197, 255, 0.18); }
 .alert-title { font-size: 1.25rem; font-weight: 700; }
 .alert-meta { font-size: 0.875rem; color: #b8b3c9; }
+.circle-banner {
+  margin: 0 0 0.35rem; padding: 0.55rem 0.7rem; border-radius: 8px; font-weight: 700; font-size: 0.95rem;
+}
+.circle-buddy { background: rgba(242, 179, 94, 0.22); border: 1px solid #f2b35e; color: #f2b35e; }
+.circle-street { background: rgba(158, 197, 255, 0.14); border: 1px solid rgba(158, 197, 255, 0.45); color: #9ec5ff; }
+.circle-quiet { margin: 0 0 0.25rem; color: #b8b3c9; font-size: 0.8rem; }
+.reply-row { flex-wrap: wrap; }
+.reply-thread { list-style: none; margin: 0.6rem 0 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.85rem; color: #b8b3c9; }
+.reply-thread li { padding: 0.35rem 0.5rem; border-radius: 6px; background: rgba(28, 33, 64, 0.7); }
+.reply-thread strong { color: #ece6d9; }
+.reply-ago { color: #8a849c; }
 .empty { margin-top: 0.75rem; color: #b8b3c9; }
 
 /* Beacon + network */
