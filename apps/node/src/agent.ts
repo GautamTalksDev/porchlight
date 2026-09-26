@@ -350,16 +350,31 @@ export class NodeAgent {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`city ingest → HTTP ${res.status}`);
-      const body = (await res.json()) as { accepted?: string[]; duplicates?: string[]; cityEvents?: unknown[] };
+      const body = (await res.json()) as { accepted?: string[]; duplicates?: string[]; cityEvents?: unknown };
       for (const id of [...(body.accepted ?? []), ...(body.duplicates ?? [])]) this.uplinked.add(id);
+      // Downlink must never fail the delivery: missing or malformed cityEvents are an empty list,
+      // and each bad event is skipped so accepted uploads still count as delivered.
       let gotCity = false;
-      for (const raw of body.cityEvents ?? []) {
-        const r = this.store.add(raw);
-        if (r.added || r.reason === "duplicate") {
-          const id = String((raw as { id?: unknown })?.id ?? "");
-          if (id) this.uplinked.add(id);
-          if (r.added) gotCity = true;
+      try {
+        let skipped = 0;
+        const cityEvents = Array.isArray(body.cityEvents) ? body.cityEvents : [];
+        for (const raw of cityEvents) {
+          try {
+            const r = this.store.add(raw);
+            if (r.added || r.reason === "duplicate") {
+              const id = String((raw as { id?: unknown })?.id ?? "");
+              if (id) this.uplinked.add(id);
+              if (r.added) gotCity = true;
+            } else {
+              skipped += 1;
+            }
+          } catch {
+            skipped += 1;
+          }
         }
+        if (skipped) console.warn(`[node] skipped ${skipped} city event(s) from downlink`);
+      } catch (err) {
+        console.warn("[node] cityEvents downlink failed:", (err as Error).message);
       }
       const was = this.uplinkMode;
       if ((this.uplinkMode as UplinkMode) !== "cut") this.uplinkMode = "online";

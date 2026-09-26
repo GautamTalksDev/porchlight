@@ -195,3 +195,60 @@ describe("three nodes and a city", () => {
     off();
   });
 });
+
+describe("uplink with a city that omits cityEvents", () => {
+  const legacy = createCityStub(`${TOKEN}-legacy`, { omitCityEvents: true });
+  let node: { agent: NodeAgent; server: import("node:http").Server; token: string } | undefined;
+
+  before(async () => {
+    await new Promise<void>((r) => legacy.server.listen(0, "127.0.0.1", r));
+    const cityPort = (legacy.server.address() as AddressInfo).port;
+    const reserved = (await import("node:http")).createServer();
+    await new Promise<void>((r) => reserved.listen(0, "127.0.0.1", r));
+    const nodePort = (reserved.address() as AddressInfo).port;
+    await new Promise((r) => reserved.close(r));
+    const config = loadConfig({
+      NODE_NAME: "node-legacy-city",
+      PORT: String(nodePort),
+      DATA_DIR: "/tmp/unused",
+      PEERS: "",
+      CITY_URL: `http://127.0.0.1:${cityPort}`,
+      CITY_INGEST_TOKEN: `${TOKEN}-legacy`,
+      BEACON_KEYS: `pl-b01:${KEY_HEX}`,
+      GOSSIP_INTERVAL_MS: "500",
+      UPLINK_INTERVAL_MS: "500",
+      HOUSEHOLDS_FILE: new URL("../../../config/households.json", import.meta.url).pathname,
+    });
+    const agent = new NodeAgent(config, generateIdentity(), { persist: false });
+    const { server, sessionToken } = createNodeServer(agent);
+    await new Promise<void>((r) => server.listen(nodePort, "127.0.0.1", r));
+    agent.start();
+    node = { agent, server, token: sessionToken };
+  });
+
+  after(async () => {
+    if (!node) {
+      await new Promise((r) => legacy.server.close(r));
+      return;
+    }
+    node.agent.stop();
+    await new Promise((r) => node!.server.close(r));
+    await new Promise((r) => legacy.server.close(r));
+  });
+
+  it("stays connected and marks events delivered when the city omits cityEvents", async () => {
+    const n = node!;
+    const listenPort = (n.server.address() as AddressInfo).port;
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x99, 1));
+    const res = await fetch(`http://127.0.0.1:${listenPort}/api/beacon`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-porchlight-token": n.token },
+      body: JSON.stringify({ beaconId: "pl-b01", frame, via: "ble", rssi: -60 }),
+    });
+    assert.equal(res.status, 200);
+    await until(() => legacy.store.size >= 1);
+    await until(() => n.agent.state().uplink.mode === "online" && n.agent.state().uplink.pending === 0);
+    assert.equal(n.agent.state().uplink.mode, "online");
+    assert.equal(n.agent.state().uplink.pending, 0);
+  });
+});

@@ -27,7 +27,10 @@ function cityEventsDownlink(store: EventStore, cityId: string): SignedEvent[] {
  *   POST /api/ingest  Authorization: Bearer <token>  { node: {id, name}, events: SignedEvent[] }
  *   → { accepted: string[], duplicates: string[], rejected: {id, reason}[], cityEvents: SignedEvent[] }
  */
-export function createCityStub(token: string): {
+export function createCityStub(
+  token: string,
+  opts: { omitCityEvents?: boolean } = {},
+): {
   server: Server;
   store: EventStore;
   down: { value: boolean };
@@ -64,6 +67,8 @@ export function createCityStub(token: string): {
           else if (r.reason === "duplicate") duplicates.push(id);
           else rejected.push({ id, reason: r.reason });
         }
+        // omitCityEvents mimics older city builds that only returned accepted/duplicates/rejected.
+        if (opts.omitCityEvents) return sendJson(res, 200, { accepted, duplicates, rejected });
         return sendJson(res, 200, {
           accepted,
           duplicates,
