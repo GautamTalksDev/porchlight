@@ -200,11 +200,19 @@ void pollSerial() {
 // pull-up input can read LOW all the time. Like Arduino's own TinyMLShield library, we drive the pin
 // HIGH and sense it through the input buffer: a press pulls it LOW. Set BUTTON_SHIELD_MODE 0 in
 // config.h for a separate button wired between any pin and GND.
+#if defined(PL_HAVE_NRF) && BUTTON_SHIELD_MODE
+// Some versions of the Mbed core leave out nrf_gpio_cfg_out_with_input, so configure the pin the same
+// way Arduino's TinyMLShield library does: output driver on and input buffer connected, so the pin can
+// be driven high and still be read.
+static void plShieldPinConfig(uint32_t pin) {
+  nrf_gpio_cfg(pin, NRF_GPIO_PIN_DIR_OUTPUT, NRF_GPIO_PIN_INPUT_CONNECT, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0S1, NRF_GPIO_PIN_NOSENSE);
+}
+#endif
 void setupButton() {
 #if defined(PL_HAVE_NRF) && BUTTON_SHIELD_MODE
   pinMode(BUTTON_PIN, OUTPUT);
   digitalWrite(BUTTON_PIN, HIGH);
-  nrf_gpio_cfg_out_with_input((uint32_t)digitalPinToPinName(BUTTON_PIN));
+  plShieldPinConfig((uint32_t)digitalPinToPinName(BUTTON_PIN));
 #else
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 #endif
