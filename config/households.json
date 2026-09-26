@@ -1,0 +1,15 @@
+{
+  "beacons": {
+    "pl-b01": { "household": "hh-maple-12" }
+  },
+  "households": {
+    "hh-maple-12": { "label": "12 Maple Crescent", "lang": "fr" },
+    "hh-birch-4": { "label": "4 Birch Lane", "lang": "en" },
+    "hh-cedar-31": { "label": "31 Cedar Row", "lang": "en" },
+    "hh-elm-7": { "label": "7 Elm Court", "lang": "fr" },
+    "hh-oak-19": { "label": "19 Oak Terrace", "lang": "en" },
+    "hh-pine-2": { "label": "2 Pine Walk", "lang": "en" },
+    "hh-spruce-45": { "label": "45 Spruce Way", "lang": "fr" },
+    "hh-willow-9": { "label": "9 Willow Bend", "lang": "en" }
+  }
+}

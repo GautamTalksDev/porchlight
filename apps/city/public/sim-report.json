@@ -1,0 +1,40 @@
+{
+  "generatedAt": "2026-09-26T06:01:41.622Z",
+  "params": {
+    "nodes": 30,
+    "loss": 0.3,
+    "cycles": 50,
+    "churn": 0.05,
+    "gateways": 0.2,
+    "outageRounds": 20,
+    "eventsPerCycle": 4,
+    "seed": 20260926,
+    "intervalMs": 1500,
+    "assert": true
+  },
+  "topology": {
+    "nodes": 30,
+    "gateways": 6,
+    "avgNeighbours": 4.1
+  },
+  "results": {
+    "eventsInjected": 200,
+    "eventsAtCity": 200,
+    "eventsLost": 0,
+    "messagesSent": 66239,
+    "messagesDropped": 21898,
+    "measuredLossRate": 0.331,
+    "propagationSeconds": {
+      "p50": 13.5,
+      "p95": 21,
+      "max": 27
+    },
+    "recoveryAfterOutageSeconds": {
+      "p50": 1.5,
+      "p95": 1.5,
+      "max": 1.5
+    },
+    "outageCycles": 50,
+    "wallClockMs": 1106
+  }
+}

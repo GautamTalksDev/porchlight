@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, tests, firmware, chaos, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install exactly what the lockfile says
+        run: npm ci
+      - name: Dependency audit (fails on high or critical)
+        run: npm audit
+      - name: Typecheck every workspace
+        run: npm run typecheck
+      - name: Unit tests, including the CGI AI firewall
+        run: npm test
+      - name: Firmware crypto matches the node (host build)
+        run: npm run test:firmware
+      - name: Chaos run (30 nodes, 30% loss, 50 outages, must lose nothing)
+        run: npm run sim:ci
+      - name: Production build of the city app
+        run: npm run city:build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+  docker:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image
+        run: docker build -t porchlight-city .

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="pl-token" content="__SESSION_TOKEN__" />
+  <meta name="color-scheme" content="dark" />
+  <title>Porchlight node __NODE_NAME__</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <a class="skip" href="#street">Skip to the street</a>
+  <header class="bar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M6 15 16 6l10 9v11H6z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><rect x="13" y="17" width="6" height="9" rx="1" class="brand-door"/></svg>
+      <div>
+        <p class="brand-name">Porchlight</p>
+        <p class="brand-node">Node <span id="node-name">__NODE_NAME__</span> <span class="mono" id="node-id"></span></p>
+      </div>
+    </div>
+    <div class="link" id="uplink" data-mode="connecting">
+      <span class="link-dot" aria-hidden="true"></span>
+      <div>
+        <p class="link-title" id="uplink-title">Connecting to the city</p>
+        <p class="link-sub" id="uplink-sub">Checking the connection</p>
+      </div>
+      <button class="btn btn-quiet" id="uplink-toggle" type="button">Cut city link</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="street-panel" aria-labelledby="street-h">
+      <div class="panel-head">
+        <h1 id="street-h">Your street</h1>
+        <p class="legend" aria-label="Legend">
+          <span class="key key-unknown">Not heard from</span>
+          <span class="key key-ok">Safe</span>
+          <span class="key key-help">Needs help</span>
+          <span class="key key-ack">Help on the way</span>
+        </p>
+      </div>
+      <ol class="street" id="street" aria-live="polite"></ol>
+      <p class="hint">Select a house to check someone in by hand.</p>
+    </section>
+
+    <aside class="side">
+      <section class="alerts" aria-labelledby="alerts-h">
+        <h2 id="alerts-h">Calls for help</h2>
+        <ol class="alert-list" id="alerts" aria-live="assertive"></ol>
+        <p class="empty" id="alerts-empty">No one has asked for help. When a beacon is pressed, it appears here within seconds.</p>
+      </section>
+
+      <section class="beacon" aria-labelledby="beacon-h">
+        <h2 id="beacon-h">Beacon</h2>
+        <p class="beacon-status" id="beacon-status">No beacon connected.</p>
+        <div class="row">
+          <button class="btn" id="connect-ble" type="button">Connect by Bluetooth</button>
+          <button class="btn btn-quiet" id="connect-serial" type="button">Connect by USB</button>
+        </div>
+        <div class="row dev" id="dev-row" hidden>
+          <span class="dev-label">No hardware? Simulate a press:</span>
+          <button class="btn btn-quiet" data-sim="help" type="button">Help</button>
+          <button class="btn btn-quiet" data-sim="ok" type="button">I'm OK</button>
+        </div>
+      </section>
+
+      <section class="network" aria-labelledby="net-h">
+        <h2 id="net-h">Neighbourhood network</h2>
+        <ul class="peers" id="peers"></ul>
+        <label class="chaos" for="chaos">
+          <span>Simulated packet loss <output id="chaos-out">0%</output></span>
+          <input id="chaos" type="range" min="0" max="90" step="5" value="0" />
+        </label>
+      </section>
+    </aside>
+
+    <section class="log" aria-labelledby="log-h">
+      <h2 id="log-h">Signed event log</h2>
+      <ol class="log-list mono" id="log"></ol>
+    </section>
+  </main>
+
+  <dialog class="sheet" id="house-sheet" aria-labelledby="sheet-h">
+    <form method="dialog" class="sheet-body">
+      <h2 id="sheet-h">House</h2>
+      <p id="sheet-status"></p>
+      <label class="note" for="sheet-note">Note for responders (optional)
+        <input id="sheet-note" maxlength="280" autocomplete="off" />
+      </label>
+      <div class="row">
+        <button class="btn btn-ok" value="ok" type="submit">Mark safe</button>
+        <button class="btn btn-help" value="help" type="submit">Needs help</button>
+        <button class="btn btn-quiet" value="cancel" type="submit">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

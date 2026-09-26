@@ -1,0 +1,15 @@
+# Cursor must never read CGI's challenge data. Sending it to any AI tool disqualifies the team.
+# Best practice: keep CGI's files OUTSIDE this repository folder. These rules are a second line of defence.
+cgi-data/
+**/cgi-data/
+*.cgi.csv
+**/*cgi*.csv
+**/*cgi*.xlsx
+
+# Secrets and keys
+.env
+.env.*
+!.env.example
+firmware/porchlight-beacon/config.h
+data/
+apps/city/.data/

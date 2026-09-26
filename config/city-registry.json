@@ -1,0 +1,18 @@
+{
+  "note": "Fictional demo data. Real deployments keep this registry only on the city server, never on neighbourhood nodes.",
+  "households": {
+    "hh-maple-12": { "label": "12 Maple Crescent", "lang": "fr", "needs": ["oxygen-concentrator", "lives-alone", "age-90-plus"] },
+    "hh-birch-4": { "label": "4 Birch Lane", "lang": "en", "needs": ["infant"] },
+    "hh-cedar-31": { "label": "31 Cedar Row", "lang": "en", "needs": [] },
+    "hh-elm-7": { "label": "7 Elm Court", "lang": "fr", "needs": ["mobility-aid", "lives-alone"] },
+    "hh-oak-19": { "label": "19 Oak Terrace", "lang": "en", "needs": ["hearing-impaired"] },
+    "hh-pine-2": { "label": "2 Pine Walk", "lang": "en", "needs": ["dialysis-at-home"] },
+    "hh-spruce-45": { "label": "45 Spruce Way", "lang": "fr", "needs": [] },
+    "hh-willow-9": { "label": "9 Willow Bend", "lang": "en", "needs": ["insulin-refrigeration"] }
+  },
+  "nodes": {
+    "node-a": "hh-birch-4",
+    "node-b": "hh-cedar-31",
+    "node-c": "hh-oak-19"
+  }
+}

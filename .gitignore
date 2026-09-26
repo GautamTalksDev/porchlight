@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+data/*
+!data/.gitkeep
+.DS_Store
+coverage/
+reports/*.json
+.next/
+apps/city/.data/
+next-env.d.ts
+
+# CGI challenge data never enters the repository. Keep it outside this folder entirely.
+cgi-data/
+*.cgi.csv

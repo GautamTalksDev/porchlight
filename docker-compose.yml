@@ -1,0 +1,44 @@
+# Production stack for one small server (tested target: Vultr Cloud Compute, Ubuntu 24.04, 2 GB RAM or more).
+# Start with: docker compose up -d
+# Caddy gets and renews the HTTPS certificate for DOMAIN automatically.
+
+services:
+  city:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      CITY_DATA_DIR: /data
+      APP_BASE_URL: https://${DOMAIN}
+    volumes:
+      - city-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      city:
+        condition: service_healthy
+
+volumes:
+  city-data:
+  caddy-data:
+  caddy-config:

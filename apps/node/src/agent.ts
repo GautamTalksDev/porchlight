@@ -1,0 +1,401 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  BeaconGuard,
+  EventStore,
+  HybridClock,
+  JsonlFileAdapter,
+  MemoryAdapter,
+  bytesToHex,
+  createEvent,
+  decodeFrame,
+  decodeHlc,
+  encodeFrame,
+  hexToBytes,
+  project,
+  syncWith,
+  type NodeIdentity,
+  type SignedEvent,
+} from "@porchlight/protocol";
+import type { NodeConfig } from "./config";
+import { ChaosError, HttpPeer } from "./net";
+
+export type UplinkMode = "disabled" | "online" | "cut" | "unreachable" | "connecting";
+
+export interface PeerState {
+  url: string;
+  id?: string;
+  lastOkAt?: number;
+  lastError?: string;
+  rttMs?: number;
+  syncs: number;
+}
+
+export interface BeaconState {
+  beaconId: string;
+  household?: string;
+  lastSeenAt?: number;
+  lastRssi?: number;
+  lastResult?: string;
+}
+
+export interface BeaconReport {
+  beaconId: string;
+  frame: string;
+  rssi?: number;
+  via: "ble" | "serial" | "sim";
+}
+
+export type BeaconOutcome =
+  | { ok: true; eventId: string; kind: "help" | "ok" | "test"; incident: string; household: string; corroborated?: boolean }
+  | { ok: false; reason: string; status: number };
+
+/**
+ * One Porchlight node: a laptop or Pi in someone's home.
+ * Owns the event log, hears beacons, gossips with neighbours, and uplinks to the city when it can.
+ */
+export class NodeAgent {
+  readonly store: EventStore;
+  readonly clock: HybridClock;
+  readonly guard = new BeaconGuard();
+  readonly peers: HttpPeer[];
+  readonly peerState = new Map<string, PeerState>();
+  readonly beacons = new Map<string, BeaconState>();
+  private readonly uplinked = new Set<string>();
+  private readonly listeners = new Set<() => void>();
+  private timers: NodeJS.Timeout[] = [];
+  private uplinkBackoffMs = 0;
+  private uplinkNextAt = 0;
+  private uplinkPersistTimer?: NodeJS.Timeout;
+  uplinkMode: UplinkMode;
+  uplinkLastOkAt?: number;
+  uplinkLastError?: string;
+  chaosDrop: number;
+  startedAt = Date.now();
+
+  constructor(
+    readonly config: NodeConfig,
+    readonly identity: NodeIdentity,
+    opts: { persist?: boolean } = {},
+  ) {
+    const persist = opts.persist ?? true;
+    this.store = new EventStore(
+      persist ? new JsonlFileAdapter(join(config.dataDir, "events.jsonl")) : new MemoryAdapter(),
+      () => ({ allowedOrigins: config.roster }),
+    );
+    this.clock = new HybridClock(identity.id);
+    this.chaosDrop = config.chaosDrop;
+    this.uplinkMode = config.cityUrl ? "connecting" : "disabled";
+    this.peers = config.peers.map((url) => new HttpPeer(url, config.networkKey, () => this.chaosDrop));
+    for (const p of this.peers) this.peerState.set(p.url, { url: p.url, syncs: 0 });
+    for (const [beaconId, b] of Object.entries(config.households.beacons)) {
+      this.beacons.set(beaconId, { beaconId, household: b.household });
+    }
+    if (persist) this.loadUplinked();
+    // Keep the HLC ahead of everything we have seen, and seed the replay guard from history.
+    for (const ev of this.store.all()) this.observe(ev);
+    this.store.onAdd((ev) => {
+      this.observe(ev);
+      this.changed();
+    });
+  }
+
+  private observe(ev: SignedEvent): void {
+    this.clock.observe(decodeHlc(ev.hlc));
+    // Learn beacon counters from every node's observations, so an old frame replayed at any node is caught.
+    if (ev.source.type === "beacon" && ev.incident) {
+      const [beaconId, sessionHex, counter] = ev.incident.split(":");
+      if (beaconId && sessionHex && counter) this.guard.seen(beaconId, parseInt(sessionHex, 16), Number(counter));
+    }
+  }
+
+  // Lifecycle
+
+  start(): void {
+    this.timers.push(setInterval(() => void this.gossipRound(), this.config.gossipIntervalMs));
+    if (this.config.cityUrl) this.timers.push(setInterval(() => void this.uplinkRound(), 500));
+  }
+
+  stop(): void {
+    for (const t of this.timers) clearInterval(t);
+    this.timers = [];
+    if (this.uplinkPersistTimer) clearTimeout(this.uplinkPersistTimer);
+    this.persistUplinked();
+  }
+
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private changed(): void {
+    for (const fn of this.listeners) fn();
+  }
+
+  // Local actions
+
+  householdForBeacon(beaconId: string): string | undefined {
+    return this.config.households.beacons[beaconId]?.household;
+  }
+
+  langFor(household: string): "en" | "fr" {
+    return this.config.households.households[household]?.lang ?? this.config.defaultLang;
+  }
+
+  /** A beacon frame relayed by the browser (Web Bluetooth / Web Serial). Authenticated here, never in the browser. */
+  handleBeacon(report: BeaconReport): BeaconOutcome {
+    const state = this.beacons.get(report.beaconId) ?? { beaconId: report.beaconId };
+    this.beacons.set(report.beaconId, state);
+    state.lastSeenAt = Date.now();
+    if (report.rssi !== undefined) state.lastRssi = report.rssi;
+    const fail = (reason: string, status: number): BeaconOutcome => {
+      state.lastResult = reason;
+      this.changed();
+      return { ok: false, reason, status };
+    };
+    const key = this.config.beaconKeys.get(report.beaconId);
+    if (!key) return fail("unknown beacon (no key configured)", 403);
+    const household = this.householdForBeacon(report.beaconId);
+    if (!household) return fail("beacon is not assigned to a household", 409);
+    let bytes: Uint8Array;
+    try {
+      bytes = hexToBytes(report.frame);
+    } catch {
+      return fail("frame is not hex", 400);
+    }
+    const decoded = decodeFrame(report.beaconId, key, bytes);
+    if (!decoded.ok) return fail(decoded.reason, 401);
+    const f = decoded.frame;
+    if (f.kind === "ack") return fail("beacons cannot send acks", 400);
+    const verdict = this.guard.check(f);
+    if (verdict === "duplicate" && f.kind === "help") {
+      // Another node already reported this press. If we heard it directly too, add our signed
+      // observation: two independent witnesses make a false alarm much less likely.
+      const inc = project(this.store.all()).incidents.find((i) => i.key === f.incident);
+      if (inc && !inc.witnesses.includes(this.identity.id)) {
+        const ev = createEvent(this.identity, this.clock, {
+          kind: "help",
+          household,
+          incident: f.incident,
+          source: { type: "beacon", beacon: report.beaconId, rssi: report.rssi },
+          lang: this.langFor(household),
+        });
+        this.store.add(ev);
+        state.lastResult = "corroborated";
+        return { ok: true, eventId: ev.id, kind: "help", incident: f.incident, household, corroborated: true };
+      }
+    }
+    if (verdict !== "accept") return fail(verdict, verdict === "duplicate" ? 200 : 429);
+    state.lastResult = `accepted ${f.kind}`;
+    if (f.kind === "test") {
+      this.changed();
+      return { ok: true, eventId: "", kind: "test", incident: f.incident, household };
+    }
+    const ev = createEvent(this.identity, this.clock, {
+      kind: f.kind,
+      household,
+      incident: f.kind === "help" ? f.incident : undefined,
+      source: { type: "beacon", beacon: report.beaconId, rssi: report.rssi },
+      lang: this.langFor(household),
+    });
+    this.store.add(ev);
+    return { ok: true, eventId: ev.id, kind: f.kind, incident: f.incident, household };
+  }
+
+  private simSessions = new Map<string, { session: number; counter: number }>();
+
+  /** Development helper: builds a genuine authenticated frame as if the Arduino sent it. */
+  simulateBeaconPress(beaconId: string, kind: "help" | "ok" | "test"): BeaconOutcome {
+    const key = this.config.beaconKeys.get(beaconId);
+    if (!key) return { ok: false, reason: "unknown beacon (no key configured)", status: 403 };
+    const s = this.simSessions.get(beaconId) ?? { session: (Math.random() * 0xffffffff) >>> 0, counter: 0 };
+    s.counter++;
+    this.simSessions.set(beaconId, s);
+    const frame = bytesToHex(encodeFrame(beaconId, key, kind, s.session, s.counter));
+    return this.handleBeacon({ beaconId, frame, rssi: -60 - Math.round(Math.random() * 20), via: "sim" });
+  }
+
+  /** Check-in from the node console, for households without a beacon. */
+  consoleCheckin(household: string, kind: "help" | "ok", note?: string): SignedEvent {
+    if (!this.config.households.households[household]) throw new Error("unknown household");
+    const ev = createEvent(this.identity, this.clock, {
+      kind,
+      household,
+      incident: kind === "help" ? `ui-${this.identity.id}-${Date.now().toString(36)}` : undefined,
+      source: { type: "console" },
+      lang: this.langFor(household),
+      note: note?.trim() || undefined,
+    });
+    this.store.add(ev);
+    return ev;
+  }
+
+  /**
+   * A neighbour acknowledges an alert. Returns an authenticated ack frame the browser can
+   * write back to the beacon so its light turns green. The beacon verifies the MAC.
+   */
+  acknowledge(incidentKey: string): { event: SignedEvent; ackFrame?: string } {
+    const inc = project(this.store.all()).incidents.find((i) => i.key === incidentKey);
+    if (!inc) throw new Error("unknown incident");
+    const ev = createEvent(this.identity, this.clock, {
+      kind: "ack",
+      household: inc.household,
+      ref: inc.eventId,
+      source: { type: "console" },
+    });
+    this.store.add(ev);
+    const [beaconId, sessionHex, counter] = inc.key.split(":");
+    const key = beaconId ? this.config.beaconKeys.get(beaconId) : undefined;
+    let ackFrame: string | undefined;
+    if (key && beaconId && sessionHex && counter) {
+      ackFrame = bytesToHex(encodeFrame(beaconId, key, "ack", parseInt(sessionHex, 16), Number(counter)));
+    }
+    return { event: ev, ackFrame };
+  }
+
+  setUplinkCut(cut: boolean): void {
+    if (!this.config.cityUrl) return;
+    this.uplinkMode = cut ? "cut" : "connecting";
+    this.uplinkBackoffMs = 0;
+    this.uplinkNextAt = 0;
+    this.changed();
+  }
+
+  setChaos(drop: number): void {
+    this.chaosDrop = Math.min(0.95, Math.max(0, drop));
+    this.changed();
+  }
+
+  // Gossip
+
+  async gossipRound(): Promise<void> {
+    if (!this.peers.length) return;
+    const shuffled = [...this.peers].sort(() => Math.random() - 0.5).slice(0, this.config.gossipFanout);
+    await Promise.all(
+      shuffled.map(async (peer) => {
+        const st = this.peerState.get(peer.url)!;
+        const t0 = performance.now();
+        try {
+          const stats = await syncWith(this.store, this.identity.id, peer);
+          st.lastOkAt = Date.now();
+          st.rttMs = Math.round(performance.now() - t0);
+          st.lastError = undefined;
+          st.syncs++;
+          if (!stats.inSync) this.changed();
+        } catch (err) {
+          st.lastError = err instanceof ChaosError ? "packet dropped (chaos)" : (err as Error).message;
+        }
+      }),
+    );
+  }
+
+  // Uplink
+
+  pendingUplink(): SignedEvent[] {
+    return this.store.all().filter((e) => !this.uplinked.has(e.id));
+  }
+
+  async uplinkRound(): Promise<void> {
+    const cityUrl = this.config.cityUrl;
+    if (!cityUrl || this.uplinkMode === "cut") return;
+    if (Date.now() < this.uplinkNextAt) return;
+    const pending = this.pendingUplink().slice(0, 250);
+    this.uplinkNextAt = Date.now() + this.config.uplinkIntervalMs;
+    try {
+      const res = await fetch(`${cityUrl}/api/ingest`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${this.config.cityToken}` },
+        body: JSON.stringify({ node: { id: this.identity.id, name: this.config.name }, events: pending }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`city ingest → HTTP ${res.status}`);
+      const body = (await res.json()) as { accepted?: string[]; duplicates?: string[] };
+      for (const id of [...(body.accepted ?? []), ...(body.duplicates ?? [])]) this.uplinked.add(id);
+      const was = this.uplinkMode;
+      if ((this.uplinkMode as UplinkMode) !== "cut") this.uplinkMode = "online";
+      this.uplinkLastOkAt = Date.now();
+      this.uplinkLastError = undefined;
+      this.uplinkBackoffMs = 0;
+      if (pending.length) this.schedulePersistUplinked();
+      if (was !== this.uplinkMode || pending.length) this.changed();
+      // Drain a backlog quickly after an outage.
+      if (pending.length === 250) this.uplinkNextAt = 0;
+    } catch (err) {
+      if ((this.uplinkMode as UplinkMode) === "cut") return;
+      this.uplinkMode = "unreachable";
+      this.uplinkLastError = (err as Error).message;
+      this.uplinkBackoffMs = Math.min(30_000, Math.max(1000, this.uplinkBackoffMs * 2));
+      this.uplinkNextAt = Date.now() + this.uplinkBackoffMs * (0.75 + Math.random() * 0.5);
+      this.changed();
+    }
+  }
+
+  private loadUplinked(): void {
+    const path = join(this.config.dataDir, "uplinked.json");
+    if (!existsSync(path)) return;
+    try {
+      for (const id of JSON.parse(readFileSync(path, "utf8")) as string[]) this.uplinked.add(id);
+    } catch {
+      // Losing this file only means re-sending events; the city dedupes by id.
+    }
+  }
+
+  private schedulePersistUplinked(): void {
+    if (this.uplinkPersistTimer) return;
+    this.uplinkPersistTimer = setTimeout(() => {
+      this.uplinkPersistTimer = undefined;
+      this.persistUplinked();
+    }, 1000);
+  }
+
+  private persistUplinked(): void {
+    try {
+      writeFileSync(join(this.config.dataDir, "uplinked.json"), JSON.stringify([...this.uplinked]), { mode: 0o600 });
+    } catch {
+      // non-fatal
+    }
+  }
+
+  // View
+
+  state() {
+    const events = this.store.all();
+    const p = project(events);
+    const label = (h: string) => this.config.households.households[h]?.label ?? h;
+    const known = new Set(p.households.map((h) => h.household));
+    const households = [
+      ...p.households,
+      ...Object.keys(this.config.households.households)
+        .filter((h) => !known.has(h))
+        .map((h) => ({ household: h, status: "unknown" as const, lastEventAt: "" })),
+    ].map((h) => ({ ...h, label: label(h.household), lang: this.langFor(h.household) }));
+    return {
+      node: { id: this.identity.id, name: this.config.name, pub: this.identity.pub, startedAt: this.startedAt },
+      uplink: {
+        mode: this.uplinkMode,
+        cityUrl: this.config.cityUrl ?? null,
+        lastOkAt: this.uplinkLastOkAt ?? null,
+        lastError: this.uplinkLastError ?? null,
+        pending: events.length - [...this.uplinked].filter((id) => this.store.has(id)).length,
+      },
+      peers: [...this.peerState.values()],
+      chaos: { drop: this.chaosDrop },
+      dev: { simulateBeacon: this.config.devSimulateBeacon, beaconIds: [...this.config.beaconKeys.keys()] },
+      counts: { events: events.length, rejected: this.store.rejected },
+      beacons: [...this.beacons.values()].map((b) => ({ ...b, label: b.household ? label(b.household) : undefined })),
+      households,
+      incidents: p.incidents.map((i) => ({ ...i, label: label(i.household) })),
+      recent: events.slice(-40).reverse().map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        household: e.household,
+        label: label(e.household),
+        origin: e.origin,
+        mine: e.origin === this.identity.id,
+        at: decodeHlc(e.hlc).wall,
+        source: e.source.type,
+        uplinked: this.uplinked.has(e.id),
+      })),
+    };
+  }
+}

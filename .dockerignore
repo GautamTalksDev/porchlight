@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/.next
+**/.data
+.git
+.env
+.env.*
+!.env.example
+data
+reports
+cgi-data
+*.cgi.csv
+firmware/porchlight-beacon/config.h

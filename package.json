@@ -1,0 +1,36 @@
+{
+  "name": "porchlight",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Offline-first neighbourhood emergency network. When the grid goes dark, the porch lights stay on.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "typecheck": "tsc -b packages/protocol apps/node apps/sim && npm run typecheck -w @porchlight/city",
+    "test": "tsx scripts/test.ts",
+    "test:firmware": "g++ -std=c++17 -Wall -Wextra -Ifirmware/porchlight-beacon firmware/test/siphash_host_test.cpp -o /tmp/pl_fw_test && /tmp/pl_fw_test",
+    "sim": "tsx apps/sim/src/run.ts",
+    "sim:ci": "tsx apps/sim/src/run.ts nodes=30 loss=0.3 cycles=50 assert && node -e \"require('fs').copyFileSync('reports/sim-latest.json','apps/city/public/sim-report.json')\"",
+    "node": "tsx apps/node/src/main.ts",
+    "demo:local": "tsx apps/node/src/demo-local.ts",
+    "keygen": "tsx apps/node/src/keygen.ts",
+    "city:dev": "npm run dev -w @porchlight/city",
+    "city:build": "npm run build -w @porchlight/city",
+    "city:start": "npm run start -w @porchlight/city",
+    "db:migrate": "npm run db:migrate -w @porchlight/city",
+    "voice:generate": "npm run voice:generate -w @porchlight/city",
+    "check": "npm run typecheck && npm test && npm run test:firmware && npm run sim:ci"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
