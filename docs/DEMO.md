@@ -20,7 +20,8 @@ flowchart LR
     S3 ==> S4["1:30<br/>Neighbour answers offline"]
     S4 ==> S5["1:50<br/>Link returns, triage"]
     S5 ==> S6["2:20<br/>Voice call"]
-    S6 ==> S7["2:50<br/>Proof and close"]
+    S6 ==> S6b["2:35<br/>Hey Porchlight"]
+    S6b ==> S7["2:50<br/>Proof and close"]
 ```
 
 **0:00 Story mode, chapters 1 to 3.** "May 21, 2022. 180,000 homes in Ottawa lost power, and the utility took its own outage map offline. These three homes still glow. They run Porchlight."
@@ -34,6 +35,8 @@ flowchart LR
 **1:50 The link returns.** Click **End the outage**. Alerts fly from the node homes to City Hall. The queue ranks everyone: "Gemini only sees anonymous references and needs. It suggests; a coordinator decides."
 
 **2:20 The voice call.** Select 12 Maple Crescent and click **Call in English**. A teammate answers in English and says she is fine. The agent uses its `mark_safe` tool, the transcript shows it, and her house turns amber. To show bilingual support, answer in French and the agent switches, or call 7 Elm Court, which is set to French.
+
+**2:35 Hey Porchlight.** Press **V** or click **Talk to Porchlight**. Ask “who needs help?” then “show Maple” and “dispatch Maple”. The floating panel shows the tool lines, the camera flies to the home, and the dispatch appears on the signed log. End the copilot before any resident call; they never run at the same time.
 
 **2:50 Proof and close.** Story mode, last two chapters. "We dropped a third of all messages and cut the city 50 times. Zero of 200 alerts lost. When the grid goes dark, the porch lights stay on."
 
@@ -56,7 +59,7 @@ flowchart LR
 * [ ] New beacon key generated with `npm run keygen pl-b01` and flashed. The demo key is gone from `.env`.
 * [ ] `DEV_SIMULATE_BEACON=false` on Node A, `true` on Node B.
 * [ ] `npm run voice:generate` done, so node consoles speak even offline.
-* [ ] Chrome or Edge on every node laptop, microphone permission granted on the city laptop.
+* [ ] Chrome or Edge on every node laptop, microphone permission granted on the city laptop. Copilot agent id set if you will demo Hey Porchlight.
 * [ ] Operations room signed in with Auth0, and 12 Maple Crescent reset: press **Mark safe** after the rehearsal.
 * [ ] `npm run check` green. The recorded video on the backup laptop's desktop.
 

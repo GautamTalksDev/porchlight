@@ -350,6 +350,32 @@ kbd { font-family: "Atkinson Mono", ui-monospace, monospace; font-size: 0.75rem;
 .line[data-who="user"] { border-left: 3px solid #9ec5ff; }
 .line[data-who="tool"] { border-left: 3px solid #ff6a55; font-size: 0.875rem; color: #b3aec6; }
 
+.copilot-panel {
+  position: absolute; z-index: 7; left: 50%; bottom: 210px; transform: translateX(-50%);
+  display: flex; align-items: flex-end; gap: 1rem; width: min(520px, calc(100% - 800px));
+  min-width: 280px; padding: 1rem 1.1rem; pointer-events: auto;
+}
+.copilot-orb {
+  flex: none; width: 48px; height: 48px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f2d9a0, #f2b35e 45%, #c47a2e);
+  box-shadow: 0 0 0 0 rgba(242, 179, 94, 0.45);
+}
+.copilot-orb[data-mode="listening"] { animation: copilot-breathe 2.4s ease-in-out infinite; }
+.copilot-orb[data-mode="speaking"] { animation: copilot-speak 0.7s ease-in-out infinite; }
+.copilot-orb[data-mode="connecting"] { opacity: 0.7; animation: copilot-breathe 1.6s ease-in-out infinite; }
+@keyframes copilot-breathe {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(242, 179, 94, 0.35); }
+  50% { transform: scale(1.08); box-shadow: 0 0 24px 6px rgba(242, 179, 94, 0.28); }
+}
+@keyframes copilot-speak {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 12px 2px rgba(242, 179, 94, 0.35); }
+  50% { transform: scale(1.16); box-shadow: 0 0 28px 8px rgba(242, 179, 94, 0.5); }
+}
+.copilot-body { flex: 1; min-width: 0; display: grid; gap: 0.35rem; }
+.copilot-title { font-weight: 800; font-size: 1.05rem; }
+.copilot-state { color: #b3aec6; font-size: 0.85rem; }
+.copilot-transcript { max-height: 140px; }
+
 .trail { display: grid; gap: 0.75rem; border-top: 1px solid rgba(236, 230, 217, 0.12); padding-top: 1rem; }
 .trail ol { display: grid; gap: 0; }
 .trail li { display: grid; grid-template-columns: auto 1fr; gap: 0.8rem; position: relative; padding: 0 0 0.9rem 0; }

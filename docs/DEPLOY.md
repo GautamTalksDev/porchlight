@@ -154,6 +154,37 @@ If they describe a fire or trouble breathing, tell them to call 911 if any phone
 
 Copy the agent id into `ELEVENLABS_AGENT_ID`. The server passes `household_label`, `language`, `needs`, `wait_minutes`, `household_id` and `incident_key` as dynamic variables on every call.
 
+### The coordinator copilot (Hey Porchlight)
+
+Create a second agent in **ElevenLabs Agents**, starting from a blank agent. This one talks to the coordinator in the operations room, not to residents.
+
+**System prompt:**
+
+```
+You are Porchlight, the voice assistant for a city emergency coordinator during a power outage. Be brief: one or two sentences. Always use your tools for facts; never guess about homes, calls or statuses. When the coordinator clearly asks you to dispatch, show, or check in on a home, do it straight away and confirm in a few words. Only mark a home safe when the coordinator explicitly says so. If an address is unclear, ask which home. Never give medical advice.
+```
+
+**First message:** anything. The app overrides it with `Porchlight here. What do you need?`
+
+**Languages:** English.
+
+**Client tools.** Add eight tools of type *client*, and turn on waiting for a response:
+
+| Tool | Parameters | Description to give the agent |
+| - | - | - |
+| `get_overview` | (none) | Spoken summary of open calls, silent homes, and link state |
+| `get_household` | `address` (string) | Status, needs, language, wait or silence, and how the latest call arrived |
+| `dispatch` | `address` (string) | Same as Dispatch a neighbour (ack). Says already on the way when appropriate |
+| `mark_safe` | `address` (string) | Same as Mark safe. Use only when the coordinator explicitly asks |
+| `show_on_map` | `address` (string) | Select the home and fly the 3D camera there. Pass `overview` for the street view |
+| `start_check_in` | `address` (string) | Ends the copilot and starts the resident voice call for that home |
+| `set_emergency` | `active` (boolean) | Declare or end the emergency clock used for silence checks |
+| `set_outage` | `active` (boolean) | Simulate or end the city outage |
+
+**Security:** turn on authentication, so the agent can only be opened with a signed URL from our server. Allow **overrides** for the first message.
+
+Copy the agent id into `ELEVENLABS_COPILOT_AGENT_ID`. The server passes `coordinator_name` as a dynamic variable.
+
 ## 8. Point the nodes at the city
 
 On each node laptop, in `.env`:

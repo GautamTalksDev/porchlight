@@ -8,7 +8,9 @@ import type { PorchlightCity } from "@/lib/city/scene";
 import { isFall } from "@/lib/fall";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
+import { useCopilot } from "./useCopilot";
 import { useVoiceCall } from "./useVoiceCall";
+import type { CopilotLive } from "./useCopilot";
 
 const STATUS_TEXT: Record<string, string> = { unknown: "Not heard from", ok: "Safe", help: "Needs help", acknowledged: "Help on the way" };
 const ACTION_TEXT: Record<string, string> = { dispatch_neighbour: "Suggested: dispatch now", voice_check_in: "Suggested: call first", monitor: "Suggested: keep watching" };
@@ -170,6 +172,51 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
 
   const voice = useVoiceCall(useCallback(() => void refreshTriage(), [refreshTriage]));
 
+  const liveRef = useRef<CopilotLive>({
+    snap: null,
+    triage: null,
+    counts: { help: 0, acknowledged: 0, ok: 0, unknown: 0 },
+    nodesReporting: 0,
+    nodesTotal: 0,
+  });
+
+  const choose = useCallback((id: string | null) => {
+    if (id == null) {
+      setSelected("");
+      cityRef.current?.focus("ops");
+      return;
+    }
+    setSelected(id);
+    cityRef.current?.focus(id);
+  }, []);
+
+  const copilot = useCopilot({
+    liveRef,
+    onSelect: choose,
+    onFocus: (target) => cityRef.current?.focus(target),
+    onStartCheckIn: (householdId, incidentKey) => {
+      void voice.start(householdId, incidentKey);
+    },
+    onToolUsed: () => void refreshTriage(),
+  });
+
+  const voiceBusy = voice.state !== "idle" && voice.state !== "error";
+  const copilotBusy = copilot.state !== "idle" && copilot.state !== "error";
+
+  const startCopilot = useCallback(async () => {
+    if (!copilot.available || voiceBusy) return;
+    await voice.end();
+    await copilot.start();
+  }, [copilot, voice, voiceBusy]);
+
+  const startResidentCall = useCallback(
+    async (householdId: string, incidentKey: string | null) => {
+      if (copilotBusy) await copilot.end();
+      await voice.start(householdId, incidentKey);
+    },
+    [copilot, copilotBusy, voice],
+  );
+
   // The arrival moment: a new call for help gets a chime, a banner, and the camera.
   useEffect(() => {
     if (!snap) return;
@@ -210,11 +257,6 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
   useEffect(() => {
     cityRef.current?.select(selectedId);
   }, [selectedId, snap]);
-
-  const choose = useCallback((id: string) => {
-    setSelected(id);
-    cityRef.current?.focus(id);
-  }, []);
 
   const act = useCallback(
     async (kind: "ok" | "ack") => {
@@ -262,7 +304,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     }
   };
 
-  // Keyboard shortcuts for a coordinator working fast: J and K move, C calls, D dispatches, S marks safe.
+  // Keyboard shortcuts for a coordinator working fast: J and K move, C calls, V talks to Porchlight, D dispatches, S marks safe.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -273,18 +315,22 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
       const key = e.key.toLowerCase();
       if (key === "j" && items.length) choose(items[Math.min(items.length - 1, idx + 1)]!.household);
       else if (key === "k" && items.length) choose(items[Math.max(0, idx - 1)]!.household);
-      else if (key === "c" && household) void voice.start(household.id, incident?.key ?? null);
+      else if (key === "c" && household && !copilotBusy) void startResidentCall(household.id, incident?.key ?? null);
+      else if (key === "v" && copilot.available && !voiceBusy) void startCopilot();
       else if (key === "d" && incident?.status === "open") void act("ack");
       else if (key === "s" && household) void act("ok");
       else if (key === "escape") {
-        setSelected("");
-        cityRef.current?.focus("ops");
+        if (copilotBusy) void copilot.end();
+        else {
+          setSelected("");
+          cityRef.current?.focus("ops");
+        }
       } else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [triage, selectedId, household, incident, voice, act, choose]);
+  }, [triage, selectedId, household, incident, voiceBusy, copilotBusy, copilot, act, choose, startCopilot, startResidentCall]);
 
   useEffect(() => {
     if (!notice) return;
@@ -310,6 +356,20 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
   const nodesFresh = (snap?.nodes ?? []).filter((n) => Date.now() - n.lastSeenAt < 15_000).length;
   const nodesTotal = Math.max(snap?.nodes.length ?? 0, nodeHouseIds.length);
 
+  liveRef.current = {
+    snap,
+    triage,
+    counts,
+    nodesReporting: nodesFresh,
+    nodesTotal,
+  };
+
+  useEffect(() => {
+    void copilot.checkAvailable();
+    // Probe once on mount so the header button can disable with a tooltip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="ops-page">
       <header className="shell-bar">
@@ -330,6 +390,16 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
               {snap?.emergencySince ? "End emergency" : "Declare emergency"}
             </button>
           </span>
+          <button
+            className="btn btn-quiet btn-small"
+            type="button"
+            aria-pressed={copilotBusy}
+            disabled={!copilot.available || voiceBusy || copilot.state === "connecting"}
+            title={!copilot.available ? "The copilot agent is not configured" : voiceBusy ? "End the resident call first" : "Talk to Porchlight (V)"}
+            onClick={() => void startCopilot()}
+          >
+            Talk to Porchlight
+          </button>
           <button className="btn btn-quiet btn-small" type="button" aria-pressed={sound} onClick={() => setSound((s) => !s)}>
             {sound ? "Sound on" : "Sound off"}
           </button>
@@ -381,6 +451,36 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
               <span>{arrival.label}. Press C to call, D to dispatch.</span>
             </span>
           </button>
+        ) : null}
+
+        {copilotBusy || copilot.state === "connecting" || (copilot.state === "error" && copilot.lines.length > 0) ? (
+          <div className="copilot-panel glass" role="dialog" aria-label="Hey Porchlight">
+            <div className="copilot-orb" data-mode={copilot.state} aria-hidden="true" />
+            <div className="copilot-body">
+              <p className="copilot-title">Hey Porchlight</p>
+              <p className="copilot-state">
+                {{
+                  idle: "Ready",
+                  connecting: "Connecting…",
+                  speaking: "Speaking",
+                  listening: "Listening",
+                  error: copilot.error ?? "Something went wrong",
+                }[copilot.state]}
+              </p>
+              {copilot.lines.length ? (
+                <ol className="transcript copilot-transcript" aria-live="polite">
+                  {copilot.lines.map((l, i) => (
+                    <li key={i} className="line" data-who={l.who}>{l.text}</li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="section-sub">Say what you need. Try “who needs help” or “show Maple”.</p>
+              )}
+            </div>
+            <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>
+              End
+            </button>
+          </div>
         ) : null}
 
         <aside className="glass ops-left" aria-labelledby="queue-h">
@@ -456,9 +556,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                         type="button"
                         onClick={() => {
                           choose(s.household);
-                          void voice.start(s.household, null);
+                          void startResidentCall(s.household, null);
                         }}
-                        disabled={voice.state === "connecting"}
+                        disabled={voice.state === "connecting" || copilotBusy}
                       >
                         Check in
                       </button>
@@ -483,7 +583,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
           </section>
 
           <p className="keys">
-            <kbd>J</kbd> <kbd>K</kbd> move <kbd>C</kbd> call <kbd>D</kbd> dispatch <kbd>S</kbd> safe <kbd>Esc</kbd> clear
+            <kbd>J</kbd> <kbd>K</kbd> move <kbd>C</kbd> call <kbd>V</kbd> Porchlight <kbd>D</kbd> dispatch <kbd>S</kbd> safe <kbd>Esc</kbd> clear
           </p>
         </aside>
 
@@ -515,7 +615,12 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                 {ranked ? <p>{ranked.reason}</p> : null}
               </div>
               <div className="actions">
-                <button className="btn btn-porch" type="button" onClick={() => voice.start(household.id, incident?.key ?? null)} disabled={voice.state === "connecting"}>
+                <button
+                  className="btn btn-porch"
+                  type="button"
+                  onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
+                  disabled={voice.state === "connecting" || copilotBusy}
+                >
                   {voice.state === "idle" || voice.state === "error" ? `Call in ${household.lang === "fr" ? "French" : "English"}` : "Calling…"}
                 </button>
                 <button className="btn btn-moon" type="button" onClick={() => act("ack")} disabled={!incident || incident.status !== "open"}>Dispatch a neighbour</button>

@@ -9,6 +9,7 @@ export function voiceConfigured() {
   return {
     tts: Boolean(process.env.ELEVENLABS_API_KEY),
     agent: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID),
+    copilot: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_COPILOT_AGENT_ID),
   };
 }
 
@@ -23,9 +24,11 @@ export function voiceFor(lang: "en" | "fr"): string {
 /**
  * A signed URL lets the browser open a conversation with our private agent without ever seeing
  * the API key. It expires quickly and is only issued to signed-in coordinators.
+ * Pass agentId for the coordinator copilot; omit it to use the resident check-in agent.
  */
-export async function agentSignedUrl(): Promise<string> {
-  const res = await client().conversationalAi.conversations.getSignedUrl({ agentId: process.env.ELEVENLABS_AGENT_ID! });
+export async function agentSignedUrl(agentId?: string): Promise<string> {
+  const id = agentId ?? process.env.ELEVENLABS_AGENT_ID!;
+  const res = await client().conversationalAi.conversations.getSignedUrl({ agentId: id });
   return res.signedUrl;
 }
 

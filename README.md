@@ -36,6 +36,7 @@ flowchart LR
 2. **Neighbours pass it on.** Laptops in nearby homes verify the alert, store it, and gossip it to each other. Lost messages are repaired on the next exchange. A neighbour can tap "I'm on my way", and the beacon turns green.
 3. **The city reaches the right door first.** When any node reconnects, the city verifies every alert again, stores it in Tiger Data, ranks who needs help first with Gemini, and calls residents in English or French with an ElevenLabs voice agent.
 4. **Silence is a signal.** During an emergency, the operations room watches vulnerable homes that have gone quiet. The people who need help most are often the ones who never call, so Porchlight flags them for a proactive check-in before anyone has to press a button.
+5. **Hey Porchlight.** The coordinator can talk to the operations room. A voice copilot summarises the queue, flies the 3D map to a home, dispatches a neighbour, or starts a resident check-in, hands free, while every action stays on the signed event log.
 
 ## What we proved
 
