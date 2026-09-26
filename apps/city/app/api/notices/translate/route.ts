@@ -3,6 +3,8 @@ import { denyUnlessCoordinator } from "@/lib/auth";
 import {
   buildNoticeTranslatePrompt,
   describeNoticeTranslateFailure,
+  formatNoticeModelFailureLog,
+  formatNoticeUnusableOutputLog,
   NOTICE_TRANSLATE_SYSTEM,
   parseNoticeTranslateBody,
   parseNoticeTranslateResponse,
@@ -51,10 +53,17 @@ export async function POST(req: Request) {
         call,
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("Gemini took longer than 6 seconds")), 6_000)),
       ]);
-      const fr = parseNoticeTranslateResponse(response.text);
-      return Response.json({ fr, model });
+      const rawText = typeof response.text === "string" ? response.text : String(response.text ?? "");
+      try {
+        const fr = parseNoticeTranslateResponse(rawText);
+        return Response.json({ fr, model });
+      } catch (parseErr) {
+        console.error(formatNoticeUnusableOutputLog(model, rawText, apiKey));
+        lastError = parseErr instanceof Error ? parseErr.message : "empty translation";
+      }
     } catch (err) {
-      lastError = (err as Error).message;
+      console.error(formatNoticeModelFailureLog(model, err, apiKey));
+      lastError = err instanceof Error ? err.message : String(err);
     }
   }
   return fail(503, describeNoticeTranslateFailure(lastError));

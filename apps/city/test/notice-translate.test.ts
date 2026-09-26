@@ -3,9 +3,12 @@ import { describe, it } from "node:test";
 import {
   buildNoticeTranslatePrompt,
   describeNoticeTranslateFailure,
+  formatNoticeModelFailureLog,
+  formatNoticeUnusableOutputLog,
   parseNoticeTranslateBody,
   parseNoticeTranslateResponse,
   runNoticeTranslate,
+  sanitizeNoticeLogText,
 } from "../lib/notice-translate.ts";
 
 describe("notice translate helpers", () => {
@@ -43,6 +46,28 @@ describe("notice translate helpers", () => {
       describeNoticeTranslateFailure("something else"),
       "Gemini is unavailable. Type the French version to send.",
     );
+  });
+
+  it("formats raw model failure and unusable output logs without leaking the API key", () => {
+    const secret = "AIzaSy-test-secret-key-value";
+    const failLine = formatNoticeModelFailureLog(
+      "gemini-2.5-flash",
+      new Error(`Request failed with key ${secret} and code 503 UNAVAILABLE`),
+      secret,
+    );
+    assert.match(failLine, /^\[notices\] model gemini-2\.5-flash failed: /);
+    assert.match(failLine, /503 UNAVAILABLE/);
+    assert.equal(failLine.includes(secret), false);
+    assert.match(failLine, /\[redacted\]/);
+    assert.ok(failLine.length <= "[notices] model gemini-2.5-flash failed: ".length + 300);
+
+    const long = "x".repeat(500);
+    const unusable = formatNoticeUnusableOutputLog("gemini-3.6-flash", `${secret}\n${long}`, secret);
+    assert.match(unusable, /^\[notices\] model gemini-3\.6-flash returned unusable output: /);
+    assert.equal(unusable.includes(secret), false);
+    assert.ok(unusable.length <= "[notices] model gemini-3.6-flash returned unusable output: ".length + 200);
+
+    assert.equal(sanitizeNoticeLogText("ab", 1, null), "a");
   });
 });
 

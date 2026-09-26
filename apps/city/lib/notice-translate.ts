@@ -68,3 +68,21 @@ export function describeNoticeTranslateFailure(message: string): string {
   }
   return "Gemini is unavailable. Type the French version to send.";
 }
+
+/** Strip control chars, redact a secret if present, and cap length for log lines. */
+export function sanitizeNoticeLogText(text: string, maxLen: number, secret?: string | null): string {
+  let out = String(text ?? "").replace(/[\u0000-\u001f\u007f]/g, " ");
+  if (secret) out = out.split(secret).join("[redacted]");
+  return out.slice(0, maxLen);
+}
+
+/** Log line when a model call throws or times out. Never includes the API key. */
+export function formatNoticeModelFailureLog(model: string, err: unknown, secret?: string | null): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return `[notices] model ${model} failed: ${sanitizeNoticeLogText(raw, 300, secret)}`;
+}
+
+/** Log line when the model answered but the body was not usable French. Never includes the API key. */
+export function formatNoticeUnusableOutputLog(model: string, raw: string, secret?: string | null): string {
+  return `[notices] model ${model} returned unusable output: ${sanitizeNoticeLogText(raw, 200, secret)}`;
+}
