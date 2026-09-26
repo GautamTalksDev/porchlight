@@ -35,6 +35,7 @@ flowchart LR
 1. **A resident presses a beacon.** A small Arduino signs the alert with its own key and sends it over Bluetooth. No app, no account, no signal.
 2. **Neighbours pass it on.** Laptops in nearby homes verify the alert, store it, and gossip it to each other. Lost messages are repaired on the next exchange. A neighbour can tap "I'm on my way", and the beacon turns green.
 3. **The city reaches the right door first.** When any node reconnects, the city verifies every alert again, stores it in Tiger Data, ranks who needs help first with Gemini, and calls residents in English or French with an ElevenLabs voice agent.
+4. **Silence is a signal.** During an emergency, the operations room watches vulnerable homes that have gone quiet. The people who need help most are often the ones who never call, so Porchlight flags them for a proactive check-in before anyone has to press a button.
 
 ## What we proved
 

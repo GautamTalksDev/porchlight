@@ -277,6 +277,7 @@ html { scroll-behavior: smooth; }
 .hud-chip[data-kind="help"] strong { color: #ff6a55; }
 .hud-chip[data-kind="acknowledged"] strong { color: #9ec5ff; }
 .hud-chip[data-kind="ok"] strong { color: #f2b35e; }
+.hud-chip[data-kind="silent"] strong { color: #b8c4e0; }
 
 .arrival {
   position: absolute; z-index: 6; top: 70px; left: 50%; transform: translateX(-50%);
@@ -321,6 +322,16 @@ html { scroll-behavior: smooth; }
 .quiet-title { font-weight: 800; font-size: 1.15rem; }
 .keys { margin-top: auto; color: #b3aec6; font-size: 0.8rem; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
 kbd { font-family: "Atkinson Mono", ui-monospace, monospace; font-size: 0.75rem; padding: 1px 6px; border-radius: 5px; border: 1px solid rgba(236, 230, 217, 0.24); background: rgba(38, 44, 82, 0.8); color: #ece6d9; }
+
+.silence-panel { display: grid; gap: 0.6rem; border-top: 1px solid rgba(236, 230, 217, 0.12); padding-top: 1rem; }
+.silence-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.silence-card {
+  display: grid; gap: 0.35rem; width: 100%; text-align: left; cursor: pointer;
+  padding: 0.7rem 0.8rem; border-radius: 12px; border: 1px solid rgba(184, 196, 224, 0.22);
+  background: rgba(184, 196, 224, 0.06); color: inherit;
+}
+.silence-card:hover { border-color: rgba(184, 196, 224, 0.4); }
+.silence-list .row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
 
 .detail-head { display: grid; gap: 0.5rem; }
 .detail-head h2 { font-size: 1.953rem; line-height: 1.1; }

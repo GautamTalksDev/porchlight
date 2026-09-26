@@ -12,6 +12,7 @@ import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
 import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
 import { NEED_LABELS, registry } from "./registry";
+import { computeSilent } from "./silence";
 
 export interface NodeSeen {
   id: string;
@@ -23,6 +24,7 @@ export interface NodeSeen {
 export type CityMessage =
   | { type: "delivery"; node: { id: string; name: string }; events: Pick<SignedEvent, "id" | "kind" | "household" | "origin" | "incident">[] }
   | { type: "outage"; down: boolean }
+  | { type: "emergency"; since: number | null }
   | { type: "action"; kind: string; household: string };
 
 interface CityState {
@@ -32,6 +34,7 @@ interface CityState {
   receivedAt: Map<string, number>;
   deliveredBy: Map<string, string>;
   outage: boolean;
+  emergencySince: number | null;
   listeners: Set<(m: CityMessage) => void>;
 }
 
@@ -47,6 +50,7 @@ export function city(): CityState {
     receivedAt: new Map(),
     deliveredBy: new Map(),
     outage: false,
+    emergencySince: null,
     listeners: new Set(),
   };
   state.ready = (async () => {
@@ -54,6 +58,7 @@ export function city(): CityState {
     try {
       for (const raw of await loadAllEvents()) state.store.add(raw);
       state.outage = (await getSetting<boolean>("outage")) ?? false;
+      state.emergencySince = (await getSetting<number | null>("emergencySince")) ?? null;
       console.log(`[city] loaded ${state.store.size} events from Tiger Data`);
     } catch (err) {
       console.error("[city] could not load from the database, starting empty:", (err as Error).message);
@@ -157,6 +162,17 @@ export async function setOutage(down: boolean): Promise<void> {
   emit({ type: "outage", down });
 }
 
+/** Start or end the emergency clock used for proactive wellness checks. */
+export async function setEmergency(active: boolean): Promise<number | null> {
+  const c = city();
+  c.emergencySince = active ? Date.now() : null;
+  if (dbEnabled()) {
+    await setSetting("emergencySince", c.emergencySince).catch((e) => console.error("[city] emergency setting not saved", e.message));
+  }
+  emit({ type: "emergency", since: c.emergencySince });
+  return c.emergencySince;
+}
+
 /** A coordinator or the voice agent acts on a household. Signed with the city's own key. */
 export async function cityAction(kind: "ok" | "ack", household: string, opts: { incident?: string; note?: string } = {}): Promise<SignedEvent | null> {
   const c = city();
@@ -173,14 +189,15 @@ export async function cityAction(kind: "ok" | "ack", household: string, opts: { 
       // A home can have several open calls if the beacon was pressed again. Answer all of them.
       events = decision.eventIds.map((ref) => createEvent(identity, clock, { ...base, kind: "ack", ref }));
     } else {
-      // Resident said they are not safe during a voice check-in with no open card: open one and dispatch.
+      // No open card: open a city call for help and dispatch (voice check-in or silent wellness).
+      const helpNote = opts.note?.trim() || VOICE_ESCALATION_NOTE;
       const help = createEvent(identity, clock, {
         household,
         source: { type: "console" },
         lang: reg.lang,
         kind: "help",
         incident: `voice-${identity.id}-${Date.now().toString(36)}`,
-        note: VOICE_ESCALATION_NOTE,
+        note: helpNote.slice(0, 280),
       });
       const ack = createEvent(identity, clock, { ...base, kind: "ack", ref: help.id });
       events = [help, ack];
@@ -267,9 +284,22 @@ export async function snapshot() {
   }
   for (const k of Object.keys(trail)) trail[k] = trail[k]!.sort((a, b) => b.at - a.at).slice(0, 8);
 
+  const thresholdMinutes = Math.max(1, Number(process.env.SILENCE_MINUTES) || 30);
+  const lastHeardAt: Record<string, number | null> = {};
+  for (const h of households) lastHeardAt[h.id] = h.lastEventAt;
+  const silent = computeSilent({
+    households: Object.entries(reg.households).map(([id, h]) => ({ id, label: h.label, lang: h.lang, needs: h.needs })),
+    lastHeardAt,
+    emergencySince: c.emergencySince,
+    now,
+    thresholdMinutes,
+  });
+
   return {
     generatedAt: now,
     outage: c.outage,
+    emergencySince: c.emergencySince,
+    silent,
     trail,
     storage: dbEnabled() ? "tiger-data" : "memory",
     counts: { events: events.length, open: incidents.filter((i) => i.status !== "resolved").length },

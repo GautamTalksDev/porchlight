@@ -14,7 +14,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 
-export type HouseholdStatus = "unknown" | "ok" | "help" | "acknowledged";
+export type HouseholdStatus = "unknown" | "ok" | "help" | "acknowledged" | "silent";
 export type FocusTarget = "overview" | "hill" | "cityhall" | "crescent" | string;
 
 export interface CityHousehold {
@@ -560,7 +560,13 @@ export class PorchlightCity {
   private applyStatus(slot: HouseSlot): void {
     const porchMat = slot.porch.material as THREE.MeshBasicMaterial;
     const beamMat = slot.beam.material as THREE.MeshBasicMaterial;
-    const text: Record<HouseholdStatus, string> = { unknown: slot.node ? "Porchlight node" : "Not heard from", ok: "Safe", help: "Needs help", acknowledged: "Help on the way" };
+    const text: Record<HouseholdStatus, string> = {
+      unknown: slot.node ? "Porchlight node" : "Not heard from",
+      ok: "Safe",
+      help: "Needs help",
+      acknowledged: "Help on the way",
+      silent: "Not heard from, silent",
+    };
     switch (slot.status) {
       case "ok":
         porchMat.color.copy(COLORS.porch).multiplyScalar(2.2);
@@ -576,6 +582,10 @@ export class PorchlightCity {
         beamMat.color.copy(COLORS.moon);
         beamMat.opacity = 0.22;
         break;
+      case "silent":
+        porchMat.color.copy(COLORS.windowCool).multiplyScalar(1.4);
+        beamMat.opacity = 0;
+        break;
       default:
         porchMat.color.copy(slot.node ? COLORS.porch.clone().multiplyScalar(1.6) : COLORS.unlit);
         beamMat.opacity = 0;
@@ -586,6 +596,7 @@ export class PorchlightCity {
       el.dataset.selected = String(this.selected === slot.id);
       const st = el.querySelector(".city-label-status");
       if (st) st.textContent = text[slot.status];
+      // Silent is not "unknown", so those homes already show their labels here.
       const show = this.opts.labels === "all" || slot.status !== "unknown" || slot.node || this.selected === slot.id;
       slot.label.visible = show;
     }
@@ -786,7 +797,7 @@ export class PorchlightCity {
     else if (this.cityLinkOnline) mastMat.color.copy(COLORS.porch).multiplyScalar(2);
     else mastMat.color.copy(COLORS.signal).multiplyScalar(Math.floor(now / 700) % 2 ? 2 : 0.2);
 
-    // Help beams breathe; rings pulse.
+    // Help beams breathe; silent rings pulse pale blue; other rings stay still.
     for (const slot of this.houses.values()) {
       if (slot.status === "help") {
         const k = this.reducedMotion ? 1 : 0.6 + 0.4 * Math.sin(now / 260);
@@ -796,6 +807,13 @@ export class PorchlightCity {
         const s = 1 + ((now / 1400) % 1) * 1.6;
         slot.ring.scale.set(s, s, s);
         ringMat.opacity = 0.7 * (1 - ((now / 1400) % 1));
+      } else if (slot.status === "silent") {
+        const ringMat = slot.ring.material as THREE.MeshBasicMaterial;
+        ringMat.color.copy(COLORS.windowCool);
+        const wave = this.reducedMotion ? 0.5 : (Math.sin(now / 900) + 1) / 2;
+        const s = 1.1 + wave * 0.55;
+        slot.ring.scale.set(s, s, s);
+        ringMat.opacity = 0.25 + wave * 0.4;
       } else {
         slot.ring.scale.set(1, 1, 1);
         const ringMat = slot.ring.material as THREE.MeshBasicMaterial;

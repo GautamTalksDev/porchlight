@@ -238,6 +238,30 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     }
   };
 
+  const toggleEmergency = async () => {
+    try {
+      await post("/api/emergency", { active: !snap?.emergencySince });
+      setNotice(snap?.emergencySince ? "Emergency ended" : "Emergency declared");
+    } catch (err) {
+      setNotice((err as Error).message);
+    }
+  };
+
+  const sendSomeoneSilent = async (householdId: string, label: string, minutesSilent: number) => {
+    try {
+      const result = await post("/api/actions", {
+        kind: "ack",
+        household: householdId,
+        note: `Proactive wellness check: not heard from for ${minutesSilent} minutes`,
+      });
+      if (result.already) setNotice(`Help is already on the way to ${label}`);
+      else setNotice(`Someone is on the way to ${label}`);
+      void refreshTriage();
+    } catch (err) {
+      setNotice((err as Error).message);
+    }
+  };
+
   // Keyboard shortcuts for a coordinator working fast: J and K move, C calls, D dispatches, S marks safe.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -268,16 +292,21 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     return () => clearTimeout(t);
   }, [notice]);
 
-  const cityHouseholds = useMemo(
-    () => (snap?.households ?? []).map((h) => ({ id: h.id, label: h.label, status: h.status as "unknown" | "ok" | "help" | "acknowledged" })),
-    [snap],
-  );
+  const cityHouseholds = useMemo(() => {
+    const silentIds = new Set((snap?.silent ?? []).map((s) => s.household));
+    return (snap?.households ?? []).map((h) => ({
+      id: h.id,
+      label: h.label,
+      status: (silentIds.has(h.id) && !h.openIncident ? "silent" : h.status) as "unknown" | "ok" | "help" | "acknowledged" | "silent",
+    }));
+  }, [snap]);
 
   const counts = useMemo(() => {
     const c = { help: 0, acknowledged: 0, ok: 0, unknown: 0 };
     for (const h of snap?.households ?? []) c[h.status as keyof typeof c] += 1;
     return c;
   }, [snap]);
+  const silentCount = snap?.silent?.length ?? 0;
   const nodesFresh = (snap?.nodes ?? []).filter((n) => Date.now() - n.lastSeenAt < 15_000).length;
   const nodesTotal = Math.max(snap?.nodes.length ?? 0, nodeHouseIds.length);
 
@@ -296,6 +325,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
             <span>{snap?.outage ? "City link down: nodes are holding calls" : "City link up"}</span>
             <button className="btn btn-quiet btn-small" type="button" onClick={toggleOutage}>
               {snap?.outage ? "End the outage" : "Simulate city outage"}
+            </button>
+            <button className="btn btn-quiet btn-small" type="button" onClick={toggleEmergency}>
+              {snap?.emergencySince ? "End emergency" : "Declare emergency"}
             </button>
           </span>
           <button className="btn btn-quiet btn-small" type="button" aria-pressed={sound} onClick={() => setSound((s) => !s)}>
@@ -337,6 +369,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
           <span className="hud-chip" data-kind="acknowledged"><strong>{counts.acknowledged}</strong>help on the way</span>
           <span className="hud-chip" data-kind="ok"><strong>{counts.ok}</strong>safe</span>
           <span className="hud-chip" data-kind="unknown"><strong>{counts.unknown}</strong>not heard from</span>
+          <span className="hud-chip" data-kind="silent"><strong>{silentCount}</strong>silent</span>
           <span className="hud-chip" data-kind="nodes"><strong>{nodesFresh}</strong>of {nodesTotal} nodes reporting</span>
         </div>
 
@@ -396,6 +429,59 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
               </p>
             </div>
           )}
+
+          <section className="silence-panel" aria-labelledby="silence-h">
+            <h2 id="silence-h" className="section-title">Haven't heard from</h2>
+            {snap?.emergencySince ? (
+              <p className="section-sub">Vulnerable homes with no sign of life since the emergency was declared.</p>
+            ) : (
+              <p className="section-sub">Declare an emergency to watch for homes that go quiet.</p>
+            )}
+            {snap?.silent?.length ? (
+              <ul className="silence-list">
+                {snap.silent.map((s) => (
+                  <li key={s.household}>
+                    <button type="button" className="silence-card" onClick={() => choose(s.household)}>
+                      <span className="call-name">{s.label}</span>
+                      <span className="call-meta">Silent for {s.minutesSilent} min. Speaks {s.lang === "fr" ? "French" : "English"}.</span>
+                      <span className="tags">
+                        {s.needs.map((n) => (
+                          <span key={n} className={`tag ${/power/.test(n) ? "tag-power" : ""}`}>{n}</span>
+                        ))}
+                      </span>
+                    </button>
+                    <div className="row">
+                      <button
+                        className="btn btn-porch btn-small"
+                        type="button"
+                        onClick={() => {
+                          choose(s.household);
+                          void voice.start(s.household, null);
+                        }}
+                        disabled={voice.state === "connecting"}
+                      >
+                        Check in
+                      </button>
+                      <button
+                        className="btn btn-small"
+                        type="button"
+                        onClick={() => void sendSomeoneSilent(s.household, s.label, s.minutesSilent)}
+                      >
+                        Send someone
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="section-sub">
+                {snap?.emergencySince
+                  ? "Every vulnerable home has checked in, or has not been silent long enough yet."
+                  : "No silent homes to show."}
+              </p>
+            )}
+          </section>
+
           <p className="keys">
             <kbd>J</kbd> <kbd>K</kbd> move <kbd>C</kbd> call <kbd>D</kbd> dispatch <kbd>S</kbd> safe <kbd>Esc</kbd> clear
           </p>
