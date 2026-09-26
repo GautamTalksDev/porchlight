@@ -139,25 +139,23 @@ export async function cityAction(kind: "ok" | "ack", household: string, opts: { 
   const reg = registry().households[household];
   if (!reg) throw new Error("unknown household");
   const { identity, clock } = cityIdentity();
-  let ref: string | undefined;
+  const base = { household, source: { type: "console" as const }, lang: reg.lang, note: opts.note?.slice(0, 280) };
+  let events: SignedEvent[];
   if (kind === "ack") {
-    const inc = project(c.store.all()).incidents.find((i) => (opts.incident ? i.key === opts.incident : i.household === household && i.status === "open"));
-    if (!inc) throw new Error("no open call for help at this household");
-    ref = inc.eventId;
+    // A home can have several open calls if the beacon was pressed again. Answer all of them.
+    const open = project(c.store.all()).incidents.filter((i) => i.household === household && i.status === "open");
+    if (!open.length) throw new Error("no open call for help at this household");
+    events = open.map((inc) => createEvent(identity, clock, { ...base, kind: "ack", ref: inc.eventId }));
+  } else {
+    events = [createEvent(identity, clock, { ...base, kind: "ok" })];
   }
-  const ev = createEvent(identity, clock, {
-    kind,
-    household,
-    ref,
-    source: { type: "console" },
-    lang: reg.lang,
-    note: opts.note?.slice(0, 280),
-  });
-  if (dbEnabled()) await insertEvents([ev], identity.id);
-  c.store.add(ev);
-  c.receivedAt.set(ev.id, Date.now());
+  if (dbEnabled()) await insertEvents(events, identity.id);
+  for (const ev of events) {
+    c.store.add(ev);
+    c.receivedAt.set(ev.id, Date.now());
+  }
   emit({ type: "action", kind, household });
-  return ev;
+  return events[events.length - 1]!;
 }
 
 /** Everything the operations room needs, in one serializable object. */

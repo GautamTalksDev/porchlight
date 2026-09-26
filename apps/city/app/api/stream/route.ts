@@ -11,6 +11,7 @@ export async function GET(req: Request) {
   const encoder = new TextEncoder();
   let unsubscribe = () => {};
   let keepAlive: ReturnType<typeof setInterval> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: string, data: unknown) => {
@@ -21,6 +22,8 @@ export async function GET(req: Request) {
         }
       };
       send("snapshot", await snapshot());
+      // Heartbeat: check-ins with nothing new change no data, so resend the snapshot every 5 seconds.
+      heartbeat = setInterval(async () => send("snapshot", await snapshot()), 5_000);
       let pending: ReturnType<typeof setTimeout> | undefined;
       unsubscribe = subscribe((m: CityMessage) => {
         send("message", m);
@@ -34,6 +37,7 @@ export async function GET(req: Request) {
       req.signal.addEventListener("abort", () => {
         unsubscribe();
         if (keepAlive) clearInterval(keepAlive);
+        if (heartbeat) clearInterval(heartbeat);
         try {
           controller.close();
         } catch {
@@ -44,6 +48,7 @@ export async function GET(req: Request) {
     cancel() {
       unsubscribe();
       if (keepAlive) clearInterval(keepAlive);
+      if (heartbeat) clearInterval(heartbeat);
     },
   });
   return new Response(stream, {

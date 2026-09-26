@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import type { CitySnapshot } from "./city";
 import { NEED_LABELS, registry } from "./registry";
-import { TriageOutput, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
+import { TriageOutput, collapseByHousehold, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
 
 const SYSTEM = `You help emergency coordinators decide who to reach first during a city-wide power outage.
 You receive open calls for help as JSON. Each has a short reference, how long it has waited, how many
@@ -60,7 +60,7 @@ const g = globalThis as unknown as { __plTriageCache?: { key: string; result: Tr
  */
 export async function triage(snap: CitySnapshot): Promise<TriageResult> {
   const reg = registry();
-  const open = snap.incidents.filter((i) => i.status !== "resolved");
+  const open = collapseByHousehold(snap.incidents.filter((i) => i.status !== "resolved"));
   const refs = new Map<string, (typeof open)[number]>();
   const cases: TriageCase[] = open.map((inc, i) => {
     const ref = `R${i + 1}`;

@@ -45,11 +45,17 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
   const [arrival, setArrival] = useState<Arrival | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [sound, setSound] = useState(true);
+  const [, setTick] = useState(0);
   const cityRef = useRef<PorchlightCity | null>(null);
   const snapRef = useRef<CitySnapshot | null>(null);
   const known = useRef<Set<string> | null>(null);
   const audio = useRef<AudioContext | null>(null);
   snapRef.current = snap;
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Live data
   useEffect(() => {
@@ -184,7 +190,10 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
   // Selection. An empty string means "nothing selected on purpose".
   const selectedId = selected === "" ? null : selected ?? triage?.items[0]?.household ?? null;
   const household = snap?.households.find((h) => h.id === selectedId) ?? null;
-  const incident = snap?.incidents.find((i) => i.household === selectedId && i.status !== "resolved") ?? null;
+  const incident =
+    snap?.incidents
+      .filter((i) => i.household === selectedId && i.status !== "resolved")
+      .sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1))[0] ?? null;
   const ranked = triage?.items.find((r) => r.household === selectedId) ?? null;
   const trail = (selectedId && snap?.trail[selectedId]) || [];
 

@@ -78,3 +78,26 @@ export function sanitizeNote(note: string | undefined): string | undefined {
   if (!note) return undefined;
   return note.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 200);
 }
+
+export interface OpenIncidentLike {
+  key: string;
+  household: string;
+  status: string;
+  openedAtMs: number;
+  witnesses: string[];
+}
+
+/** One entry per home: prefer an unanswered call, then the one waiting longest. Witnesses are merged. */
+export function collapseByHousehold<T extends OpenIncidentLike>(list: T[]): T[] {
+  const best = new Map<string, T>();
+  const heard = new Map<string, Set<string>>();
+  const rank = (i: T) => (i.status === "open" ? 0 : 1);
+  for (const inc of list) {
+    const w = heard.get(inc.household) ?? new Set<string>();
+    for (const x of inc.witnesses) w.add(x);
+    heard.set(inc.household, w);
+    const cur = best.get(inc.household);
+    if (!cur || rank(inc) < rank(cur) || (rank(inc) === rank(cur) && inc.openedAtMs < cur.openedAtMs)) best.set(inc.household, inc);
+  }
+  return [...best.values()].map((i) => ({ ...i, witnesses: [...(heard.get(i.household) ?? [])] }));
+}
