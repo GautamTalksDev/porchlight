@@ -19,7 +19,7 @@ flowchart LR
     S2 ==> S3["1:00<br/>City goes dark"]
     S3 ==> S4["1:30<br/>Neighbour answers offline"]
     S4 ==> S5["1:50<br/>Link returns, triage"]
-    S5 ==> S6["2:20<br/>Voice call in French"]
+    S5 ==> S6["2:20<br/>Voice call"]
     S6 ==> S7["2:50<br/>Proof and close"]
 ```
 
@@ -33,7 +33,7 @@ flowchart LR
 
 **1:50 The link returns.** Click **End the outage**. Alerts fly from the node homes to City Hall. The queue ranks everyone: "Gemini only sees anonymous references and needs. It suggests; a coordinator decides."
 
-**2:20 The voice call.** Select 12 Maple Crescent and click **Call in French**. A teammate answers in French and says she is fine. The agent uses its `mark_safe` tool, the transcript shows it, and her house turns amber.
+**2:20 The voice call.** Select 12 Maple Crescent and click **Call in English**. A teammate answers in English and says she is fine. The agent uses its `mark_safe` tool, the transcript shows it, and her house turns amber. To show bilingual support, answer in French and the agent switches, or call 7 Elm Court, which is set to French.
 
 **2:50 Proof and close.** Story mode, last two chapters. "We dropped a third of all messages and cut the city 50 times. Zero of 200 alerts lost. When the grid goes dark, the porch lights stay on."
 

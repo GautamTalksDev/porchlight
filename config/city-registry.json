@@ -1,7 +1,7 @@
 {
   "note": "Fictional demo data. Real deployments keep this registry only on the city server, never on neighbourhood nodes.",
   "households": {
-    "hh-maple-12": { "label": "12 Maple Crescent", "lang": "fr", "needs": ["oxygen-concentrator", "lives-alone", "age-90-plus"] },
+    "hh-maple-12": { "label": "12 Maple Crescent", "lang": "en", "needs": ["oxygen-concentrator", "lives-alone", "age-90-plus"] },
     "hh-birch-4": { "label": "4 Birch Lane", "lang": "en", "needs": ["infant"] },
     "hh-cedar-31": { "label": "31 Cedar Row", "lang": "en", "needs": [] },
     "hh-elm-7": { "label": "7 Elm Court", "lang": "fr", "needs": ["mobility-aid", "lives-alone"] },
