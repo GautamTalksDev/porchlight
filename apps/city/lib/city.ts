@@ -28,6 +28,7 @@ interface CityState {
   store: EventStore;
   nodes: Map<string, NodeSeen>;
   receivedAt: Map<string, number>;
+  deliveredBy: Map<string, string>;
   outage: boolean;
   listeners: Set<(m: CityMessage) => void>;
 }
@@ -42,6 +43,7 @@ export function city(): CityState {
     store: new EventStore(),
     nodes: new Map(),
     receivedAt: new Map(),
+    deliveredBy: new Map(),
     outage: false,
     listeners: new Set(),
   };
@@ -106,6 +108,7 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
   for (const ev of fresh) {
     c.store.add(ev);
     c.receivedAt.set(ev.id, Date.now());
+    c.deliveredBy.set(ev.id, node.name);
     result.accepted.push(ev.id);
   }
   const seen = c.nodes.get(node.id) ?? { id: node.id, name: node.name, lastSeenAt: 0, delivered: 0 };
@@ -208,9 +211,28 @@ export async function snapshot() {
     const q = (x: number) => Math.round(holds[Math.min(holds.length - 1, Math.floor(x * holds.length))] ?? 0);
     hold = { p50: q(0.5), p95: q(0.95), max: Math.round(holds.at(-1) ?? 0), n: holds.length };
   }
+  // Provenance for each home: who signed each event, how it reached the city, newest first.
+  const nameOf = new Map([...c.nodes.values()].map((n) => [n.id, n.name]));
+  const cityId = cityIdentity().identity.id;
+  const trail: Record<string, { id: string; kind: string; at: number; by: string; via: string | null; source: string; beacon: string | null }[]> = {};
+  for (const e of events) {
+    const list = (trail[e.household] ??= []);
+    list.push({
+      id: e.id.slice(0, 10),
+      kind: e.kind,
+      at: decodeHlc(e.hlc).wall,
+      by: e.origin === cityId ? "the city" : nameOf.get(e.origin) ?? `node ${e.origin.slice(0, 6)}`,
+      via: c.deliveredBy.get(e.id) ?? null,
+      source: e.source.type,
+      beacon: e.source.beacon ?? null,
+    });
+  }
+  for (const k of Object.keys(trail)) trail[k] = trail[k]!.sort((a, b) => b.at - a.at).slice(0, 8);
+
   return {
     generatedAt: now,
     outage: c.outage,
+    trail,
     storage: dbEnabled() ? "tiger-data" : "memory",
     counts: { events: events.length, open: incidents.filter((i) => i.status !== "resolved").length },
     households,

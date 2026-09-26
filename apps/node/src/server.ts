@@ -99,9 +99,13 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
       for (const c of sseClients) c.write(data);
     }, 120);
   });
+  // Heartbeat: gossip with peers that are already in sync changes no data, so push the full state
+  // every 2 seconds anyway. Peer health and "last delivered" times then stay true on screen.
   setInterval(() => {
-    for (const c of sseClients) c.write(": keep-alive\n\n");
-  }, 15_000).unref();
+    if (!sseClients.size) return;
+    const data = `event: state\ndata: ${JSON.stringify(agent.state())}\n\n`;
+    for (const c of sseClients) c.write(data);
+  }, 2_000).unref();
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://node.local");

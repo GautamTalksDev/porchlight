@@ -15,13 +15,27 @@ export function Timeline({ buckets, source }: { buckets: TimelineBucket[]; sourc
   const w = 600;
   const h = 64;
   const bw = w / 60;
+  const total = slots.reduce((s, x) => s + x.help + x.ok + x.ack, 0);
   const sourceText: Record<string, string> = {
     "continuous-aggregate": "From a Tiger Data continuous aggregate",
     postgres: "From PostgreSQL",
     memory: "Computed in memory (no database connected)",
     unavailable: "Database unavailable",
   };
-  const total = slots.reduce((s, x) => s + x.help + x.ok + x.ack, 0);
+  if (total === 0) {
+    return (
+      <div className="chart">
+        <p className="section-title">Last hour</p>
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+          <line x1="0" y1={h - 2} x2={w} y2={h - 2} stroke="rgba(236, 230, 217, 0.25)" strokeWidth="2" strokeDasharray="4 6" />
+        </svg>
+        <p className="chart-legend">
+          <span>No activity in the last hour. The line rises the moment someone presses a beacon.</span>
+          <span>{sourceText[source] ?? source}</span>
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="chart">
       <p className="section-title">Last hour</p>

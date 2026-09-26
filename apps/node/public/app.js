@@ -462,4 +462,4 @@ function connectStream() {
   };
 }
 connectStream();
-setInterval(() => state && render(state), 5000);
+setInterval(() => state && render(state), 1000);

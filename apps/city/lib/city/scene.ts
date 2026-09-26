@@ -154,8 +154,8 @@ export class PorchlightCity {
     this.labelRenderer.domElement.className = "city-labels";
     container.appendChild(this.labelRenderer.domElement);
 
-    this.scene.background = COLORS.sky;
-    this.scene.fog = new THREE.FogExp2(COLORS.sky, 0.0022);
+    this.scene.background = this.makeSkyTexture();
+    this.scene.fog = new THREE.FogExp2(COLORS.sky, 0.0017);
 
     this.camera = new THREE.PerspectiveCamera(42, w / h, 1, 2000);
     this.camera.position.set(230, 170, 280);
@@ -232,6 +232,7 @@ export class PorchlightCity {
     this.scene.add(this.mastLight);
 
     this.placeHouseholds(households, nodeHouseIds);
+    this.buildSky();
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -258,6 +259,54 @@ export class PorchlightCity {
   }
 
   // World building
+
+  /** A vertical night gradient, darker overhead and faintly lit near the horizon. */
+  private makeSkyTexture(): THREE.Texture {
+    const c = document.createElement("canvas");
+    c.width = 4;
+    c.height = 512;
+    const g = c.getContext("2d")!;
+    const grad = g.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, "#04050d");
+    grad.addColorStop(0.45, "#0b0e23");
+    grad.addColorStop(0.72, "#161b3e");
+    grad.addColorStop(0.86, "#232a57");
+    grad.addColorStop(1, "#0c0f24");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 4, 512);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** Stars and a moon, outside the fog so they stay crisp. */
+  private buildSky(): void {
+    const rand = mulberry32(99);
+    const n = 900;
+    const pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const theta = rand() * Math.PI * 2;
+      const phi = Math.acos(0.15 + rand() * 0.85);
+      const r = 950;
+      pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      pos[i * 3 + 1] = r * Math.cos(phi);
+      pos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    this.scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: "#d6ddff", size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0.85, fog: false })));
+    const moon = new THREE.Mesh(
+      new THREE.SphereGeometry(22, 32, 32),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color("#eef2ff").multiplyScalar(1.6), toneMapped: false, fog: false }),
+    );
+    moon.position.set(-470, 330, -760);
+    const halo = new THREE.Mesh(
+      new THREE.SphereGeometry(60, 32, 32),
+      new THREE.MeshBasicMaterial({ color: "#9ec5ff", transparent: true, opacity: 0.07, depthWrite: false, fog: false }),
+    );
+    halo.position.copy(moon.position);
+    this.scene.add(moon, halo);
+  }
 
   private buildGround(): void {
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), new THREE.MeshStandardMaterial({ color: COLORS.ground, roughness: 1 }));
@@ -614,6 +663,9 @@ export class PorchlightCity {
     } else if (target === "cityhall") {
       pos = new THREE.Vector3(-20, 70, 100);
       look = new THREE.Vector3(-88, 25, 22);
+    } else if (target === "ops") {
+      pos = new THREE.Vector3(95, 135, 310);
+      look = new THREE.Vector3(-25, 0, 40);
     } else if (target === "crescent") {
       pos = new THREE.Vector3(40, 90, 230);
       look = new THREE.Vector3(-40, 0, 120);
@@ -629,6 +681,22 @@ export class PorchlightCity {
       return;
     }
     this.cameraTween = { from: this.camera.position.clone(), to: pos, tFrom: this.controls.target.clone(), tTo: look, start: performance.now(), ms };
+  }
+
+  /** Place the camera exactly, with no tween. The scroll story drives the camera every frame. */
+  setView(pos: readonly [number, number, number], look: readonly [number, number, number]): void {
+    this.cameraTween = undefined;
+    this.camera.position.set(pos[0], pos[1], pos[2]);
+    this.controls.target.set(look[0], look[1], look[2]);
+  }
+
+  /** Jump the storm front to an exact position, for scroll scrubbing. */
+  setBlackoutNow(value: number): void {
+    const v = Math.min(1, Math.max(0, value));
+    if (Math.abs(v - this.blackout) < 0.002) return;
+    this.blackout = v;
+    this.blackoutTarget = v;
+    this.updateLights();
   }
 
   setAutoRotate(on: boolean): void {
