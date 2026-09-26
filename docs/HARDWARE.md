@@ -19,8 +19,15 @@ flowchart LR
 | Amber, slow blink | A node received the call. Waiting for a neighbour |
 | Green, solid | A neighbour is on the way. This comes from a signed acknowledgement, so it cannot be faked |
 | Blue, short flash | "I'm safe" was sent |
+| Purple, fast blink | Possible fall detected, press the button within 10 seconds to cancel |
 
 **Press** the button for help. **Hold it for 1.5 seconds** to say "I'm safe".
+
+## Fall detection
+
+When fall detection is on (`FALL_DETECTION 1` in `config.h`), the on-board motion sensor watches for a short free fall or a hard impact, then a moment of stillness. If that sequence looks like a fall, the LED blinks purple for 10 seconds. Press the button in that window to cancel. If you do not cancel, the beacon sends a fall frame (the same path as a help press, including resends until a neighbour acknowledges).
+
+You can exercise the countdown without dropping the board by typing `PLX` in the Serial Monitor.
 
 ## Set up the Arduino IDE (once per laptop)
 
@@ -71,6 +78,7 @@ You can always test without the button by typing into the Serial Monitor:
 | `PLH` | Sends help, as if the button were pressed |
 | `PLO` | Sends "I'm safe" |
 | `PLT` | Sends a test frame |
+| `PLX` | Starts the fall countdown (bench test, no drop needed) |
 
 ## Connect it to a node
 

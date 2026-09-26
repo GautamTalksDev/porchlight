@@ -1,5 +1,5 @@
 // Porchlight beacon frame, 18 bytes. Mirrors packages/protocol/src/beacon.ts.
-//   [0] version=1  [1] kind (1 help, 2 ok, 3 test, 16 ack)  [2..5] session u32 LE  [6..9] counter u32 LE
+//   [0] version=1  [1] kind (1 help, 2 ok, 3 test, 4 fall, 16 ack)  [2..5] session u32 LE  [6..9] counter u32 LE
 //   [10..17] SipHash-2-4 over (beaconId || 0x00 || bytes 0..9)
 #pragma once
 #include <string.h>
@@ -7,7 +7,7 @@
 
 namespace pl {
 
-enum Kind : uint8_t { KIND_HELP = 1, KIND_OK = 2, KIND_TEST = 3, KIND_ACK = 16 };
+enum Kind : uint8_t { KIND_HELP = 1, KIND_OK = 2, KIND_TEST = 3, KIND_FALL = 4, KIND_ACK = 16 };
 static const size_t FRAME_LEN = 18;
 
 static inline void put32le(uint8_t *p, uint32_t v) {

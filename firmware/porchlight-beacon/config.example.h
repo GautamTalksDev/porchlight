@@ -21,3 +21,6 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 // Re-send an unacknowledged help alert this often, and stop after this long.
 #define RESEND_EVERY_MS 3000
 #define RESEND_FOR_MS 600000
+
+// Automatic fall detection with the on-board motion sensor. 1 = on, 0 = off.
+#define FALL_DETECTION 1
