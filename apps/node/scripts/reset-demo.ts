@@ -42,11 +42,12 @@ for (const name of NAMES) {
   const cleared: string[] = [];
   if (removeIfPresent(join(dir, "events.jsonl"))) cleared.push("events.jsonl");
   if (removeIfPresent(join(dir, "uplinked.json"))) cleared.push("uplinked.json");
-  const kept = existsSync(join(dir, "identity.json")) ? "identity.json kept" : "no identity yet";
+  const keptId = existsSync(join(dir, "identity.json")) ? "identity.json kept" : "no identity yet";
+  const keptCity = existsSync(join(dir, "city-id.json")) ? "city-id.json kept" : "no city id yet";
   if (cleared.length) {
-    console.log(`${name}: cleared ${cleared.join(", ")}; ${kept}`);
+    console.log(`${name}: cleared ${cleared.join(", ")}; ${keptId}; ${keptCity}`);
   } else {
-    console.log(`${name}: nothing to clear; ${kept}`);
+    console.log(`${name}: nothing to clear; ${keptId}; ${keptCity}`);
   }
 }
 console.log("Done. Start the nodes with npm run demo:local.");

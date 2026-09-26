@@ -288,3 +288,82 @@ describe("reply events", () => {
     );
   });
 });
+
+describe("notice events", () => {
+  it("accepts bilingual notice within limits", () => {
+    const city = generateIdentity();
+    const clock = new HybridClock(city.id);
+    const ev = createEvent(city, clock, {
+      kind: "notice",
+      household: "city-hall",
+      notice: { en: "Shelter open on Main.", fr: "Refuge ouvert sur Main.", severity: "info" },
+      source: { type: "console" },
+    });
+    const v = verifyEvent(ev, { cityOrigin: city.id });
+    assert.equal(v.ok, true);
+  });
+
+  it("rejects English over 280 and French over 320", () => {
+    const city = generateIdentity();
+    const clock = new HybridClock(city.id);
+    assert.throws(
+      () =>
+        createEvent(city, clock, {
+          kind: "notice",
+          household: "city-hall",
+          notice: { en: "e".repeat(281), fr: "ok", severity: "info" },
+          source: { type: "console" },
+        }),
+    );
+    assert.throws(
+      () =>
+        createEvent(city, clock, {
+          kind: "notice",
+          household: "city-hall",
+          notice: { en: "ok", fr: "f".repeat(321), severity: "urgent" },
+          source: { type: "console" },
+        }),
+    );
+  });
+
+  it("rejects empty language strings", () => {
+    const city = generateIdentity();
+    const clock = new HybridClock(city.id);
+    assert.throws(
+      () =>
+        createEvent(city, clock, {
+          kind: "notice",
+          household: "city-hall",
+          notice: { en: "", fr: "ok", severity: "info" },
+          source: { type: "console" },
+        }),
+    );
+  });
+
+  it("rejects a notice not signed by the pinned city", () => {
+    const city = generateIdentity();
+    const other = generateIdentity();
+    const clock = new HybridClock(other.id);
+    const ev = createEvent(other, clock, {
+      kind: "notice",
+      household: "city-hall",
+      notice: { en: "Fake", fr: "Faux", severity: "urgent" },
+      source: { type: "console" },
+    });
+    let logged = 0;
+    const v = verifyEvent(ev, { cityOrigin: city.id, onNoticeRejected: () => (logged += 1) });
+    assert.equal(v.ok, false);
+    if (!v.ok) assert.match(v.reason, /not signed by the City/);
+    assert.equal(logged, 1);
+  });
+});
+
+describe("alive events", () => {
+  it("creates and verifies an alive event with no extra payload", () => {
+    const me = generateIdentity();
+    const clock = new HybridClock(me.id);
+    const ev = createEvent(me, clock, { kind: "alive", household: "hh-maple-12", source: { type: "console" } });
+    assert.equal(ev.kind, "alive");
+    assert.equal(verifyEvent(ev).ok, true);
+  });
+});

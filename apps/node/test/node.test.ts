@@ -211,6 +211,36 @@ describe("three nodes and a city", () => {
     assert.equal(pubs.length, 1);
     off();
   });
+
+  it("a city notice reaches a second node by gossip", async () => {
+    await until(() => nodes.every((n) => n.agent.state().uplink.mode === "online"));
+    const notice = createEvent(city.identity, city.clock, {
+      kind: "notice",
+      household: "city-hall",
+      notice: { en: "Shelter open on Main Street.", fr: "Refuge ouvert sur la rue Main.", severity: "info" },
+      source: { type: "console" },
+    });
+    assert.equal(city.store.add(notice).added, true);
+    await until(() => nodes[0]!.agent.store.has(notice.id));
+    await until(() => nodes[1]!.agent.store.has(notice.id));
+    await until(() => nodes[2]!.agent.store.has(notice.id));
+  });
+
+  it("rejects a notice signed by another node", async () => {
+    await until(() => nodes.every((n) => n.agent.state().uplink.mode === "online"));
+    const faker = nodes[0]!.agent.identity;
+    const fake = createEvent(faker, new HybridClock(faker.id), {
+      kind: "notice",
+      household: "city-hall",
+      notice: { en: "Fake notice", fr: "Fausse alerte", severity: "urgent" },
+      source: { type: "console" },
+    });
+    for (const n of nodes) {
+      const r = n.agent.store.add(fake);
+      assert.equal(r.added, false);
+      assert.match(r.reason, /not signed by the City/);
+    }
+  });
 });
 
 describe("uplink with a city that omits cityEvents", () => {

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS events (
   id text NOT NULL,
   event_time timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
-  kind text NOT NULL CHECK (kind IN ('help', 'ok', 'ack', 'note', 'reply')),
+  kind text NOT NULL CHECK (kind IN ('help', 'ok', 'ack', 'note', 'reply', 'notice', 'alive')),
   household text NOT NULL,
   origin text NOT NULL,
   delivered_by text,
@@ -59,7 +59,11 @@ CREATE TABLE IF NOT EXISTS settings (
   value jsonb NOT NULL
 );
 
-/* Widen the events.kind check for existing databases created before neighbour replies.
+/* Widen the events.kind check for existing databases created before neighbour replies and city notices.
    CREATE TABLE IF NOT EXISTS does not replace an older CHECK, so this step is separate and idempotent. */
 ALTER TABLE events DROP CONSTRAINT IF EXISTS events_kind_check;
-ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK (kind IN ('help', 'ok', 'ack', 'note', 'reply'));
+ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK (kind IN ('help', 'ok', 'ack', 'note', 'reply', 'notice', 'alive'));
+
+/* Drop history older than 30 days. Safe to re-run. */
+SELECT add_retention_policy('events', INTERVAL '30 days', if_not_exists => TRUE);
+SELECT add_retention_policy('deliveries', INTERVAL '30 days', if_not_exists => TRUE);

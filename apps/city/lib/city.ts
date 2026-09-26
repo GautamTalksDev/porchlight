@@ -2,11 +2,13 @@ import "server-only";
 import {
   EventStore,
   REPLY_LABELS,
+  CITY_BROADCAST_HOUSEHOLD,
   compareHlc,
   createEvent,
   decodeHlc,
   escalationTier,
   project,
+  type NoticePayload,
   type SignedEvent,
 } from "@porchlight/protocol";
 import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
@@ -14,6 +16,7 @@ import { buildNeighbourThread, circleWindows } from "./circles";
 import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, clearDemoTables, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
 import { classifyIngestItem } from "./ingest-verify";
+import { noticeReachStats, recordNoticeConfirmations } from "./notice-delivery";
 import { NEED_LABELS, registry } from "./registry";
 import { computeSilent } from "./silence";
 import { shouldSkipAnalytics } from "./analytics-backoff";
@@ -43,6 +46,8 @@ interface CityState {
   listeners: Set<(m: CityMessage) => void>;
   /** Wall clock when analytics last failed; used to skip retries for 30 seconds. */
   analyticsFailedAt: number | null;
+  /** Per notice id, which node ids have confirmed they hold it. */
+  noticeConfirmations: Map<string, Set<string>>;
 }
 
 const g = globalThis as unknown as { __plCity?: CityState };
@@ -60,6 +65,7 @@ export function city(): CityState {
     emergencySince: null,
     listeners: new Set(),
     analyticsFailedAt: null,
+    noticeConfirmations: new Map(),
   };
   state.ready = (async () => {
     if (!dbEnabled()) return;
@@ -97,6 +103,8 @@ export interface IngestResult {
   rejected: { id: string; reason: string }[];
   /** City-signed decisions for the street: oldest first, last 24 hours, at most 200. */
   cityEvents: SignedEvent[];
+  /** City signing origin id; nodes pin this and only accept notices from it. */
+  cityId: string;
 }
 
 /** City-origin events the node should pull down and gossip to neighbours. */
@@ -111,14 +119,24 @@ function cityEventsDownlink(): SignedEvent[] {
     .slice(0, 200);
 }
 
+function knownNoticeIds(c: CityState): Set<string> {
+  const cityId = cityIdentity().identity.id;
+  return new Set(c.store.all().filter((e) => e.kind === "notice" && e.origin === cityId).map((e) => e.id));
+}
+
 /**
  * Accept a batch from a node. Every event is verified before it is stored, and it is written to
  * Tiger Data before it is acknowledged, so a node only forgets an event once it is durable here.
  */
-export async function ingest(node: { id: string; name: string }, raw: unknown[]): Promise<IngestResult> {
+export async function ingest(
+  node: { id: string; name: string },
+  raw: unknown[],
+  heldNoticeIds: string[] = [],
+): Promise<IngestResult> {
   const c = city();
   await c.ready;
-  const result: IngestResult = { accepted: [], duplicates: [], rejected: [], cityEvents: [] };
+  const cityId = cityIdentity().identity.id;
+  const result: IngestResult = { accepted: [], duplicates: [], rejected: [], cityEvents: [], cityId };
   const fresh: SignedEvent[] = [];
   for (const item of raw) {
     const verdict = classifyIngestItem(item, (id) => c.store.has(id));
@@ -128,6 +146,10 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
     }
     if (verdict.status === "rejected") {
       result.rejected.push({ id: verdict.id, reason: verdict.reason });
+      continue;
+    }
+    if (verdict.event.kind === "notice" && verdict.event.origin !== cityId) {
+      result.rejected.push({ id: verdict.event.id, reason: "notice not signed by the City" });
       continue;
     }
     fresh.push(verdict.event);
@@ -152,6 +174,7 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
   seen.delivered += result.accepted.length;
   seen.name = node.name;
   c.nodes.set(node.id, seen);
+  recordNoticeConfirmations(c.noticeConfirmations, node.id, heldNoticeIds, knownNoticeIds(c));
   if (dbEnabled() && (raw.length || result.rejected.length)) {
     recordDelivery(node.id, node.name, result.accepted.length, result.duplicates.length, result.rejected.length).catch(() => {});
   }
@@ -194,12 +217,32 @@ export async function resetDemo(): Promise<void> {
   c.outage = false;
   c.emergencySince = null;
   c.analyticsFailedAt = null;
+  c.noticeConfirmations.clear();
   if (dbEnabled()) {
     await clearDemoTables();
     await setSetting("outage", false);
     await setSetting("emergencySince", null);
   }
   emit({ type: "reset" });
+}
+
+/** Broadcast a bilingual notice signed by the city. Stored like other city events for downlink. */
+export async function publishNotice(notice: NoticePayload): Promise<SignedEvent> {
+  const c = city();
+  await c.ready;
+  const { identity, clock } = cityIdentity();
+  const ev = createEvent(identity, clock, {
+    kind: "notice",
+    household: CITY_BROADCAST_HOUSEHOLD,
+    notice,
+    source: { type: "console" },
+  });
+  if (dbEnabled()) await insertEvents([ev], identity.id);
+  c.store.add(ev);
+  c.receivedAt.set(ev.id, Date.now());
+  c.noticeConfirmations.set(ev.id, new Set());
+  emit({ type: "action", kind: "notice", household: CITY_BROADCAST_HOUSEHOLD });
+  return ev;
 }
 
 /** A coordinator or the voice agent acts on a household. Signed with the city's own key. */
@@ -351,6 +394,10 @@ export async function snapshot() {
     thresholdMinutes,
   });
 
+  const cityNoticeIds = events.filter((e) => e.kind === "notice" && e.origin === cityId).map((e) => e.id);
+  const totalNodes = Math.max(Object.keys(reg.nodes).length, 1);
+  const noticeDelivery = noticeReachStats(cityNoticeIds, c.noticeConfirmations, totalNodes);
+
   return {
     generatedAt: now,
     outage: c.outage,
@@ -365,6 +412,7 @@ export async function snapshot() {
     nodeHouses: reg.nodes,
     timeline: tl,
     holdSeconds: hold,
+    noticeDelivery,
   };
 }
 

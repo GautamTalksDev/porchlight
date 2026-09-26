@@ -114,6 +114,10 @@ export function project(events: readonly SignedEvent[]): Projection {
       case "note":
         hh(ev.household, ev.hlc);
         break;
+      case "notice":
+      case "alive":
+        hh(ev.household, ev.hlc);
+        break;
       case "reply": {
         const inc =
           byEventId.get(ev.ref!) ??

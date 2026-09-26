@@ -11,6 +11,7 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md) at the repository r
 | The truth of a call for help | A fake alert wastes a responder. A suppressed one can cost a life |
 | The household registry (needs, language) | Knowing who is alone and dependent on power is dangerous in the wrong hands |
 | Coordinator actions | "Marked safe" closes a case. It must be attributable and impossible to forge |
+| City notices | A forged urgent notice could send people to the wrong place or spark panic |
 
 ## Who we defend against
 
@@ -49,7 +50,7 @@ flowchart LR
 | **A05 Injection** | All SQL is parameterized. Every input is parsed by a strict schema that rejects unknown fields. React escapes everything it renders, and the node console builds its page with `textContent` only. Notes may not contain control characters. |
 | **A06 Insecure Design** | A threat model (this page). Write before acknowledge, so data is never lost on a crash. AI is advisory and cannot act alone. Health needs stay on the city server and are never sent to nodes. Rate limits on every expensive or sensitive route. |
 | **A07 Authentication Failures** | Coordinators sign in with Auth0, where multi-factor authentication can be required. Sessions roll, expire after 2 hours idle and 12 hours in total, and can be ended with Sign out. Nodes authenticate to the city with a bearer token compared in constant time. |
-| **A08 Software or Data Integrity Failures** | Every event is signed and content addressed, and verified again at every hop and at the city. The firmware's crypto is checked against shared test vectors in CI. Production images are built from the lockfile. |
+| **A08 Software or Data Integrity Failures** | Every event is signed and content addressed, and verified again at every hop and at the city. City `notice` events are accepted only when origin matches the pinned city id (from the first uplink or `CITY_ID`), so a neighbourhood node cannot forge a city broadcast. The firmware's crypto is checked against shared test vectors in CI. Production images are built from the lockfile. |
 | **A09 Security Logging and Alerting Failures** | Every delivery is recorded per node with accepted, duplicate and rejected counts. Every coordinator and voice agent action becomes a signed, stored event, which makes a tamper-evident audit trail. Storage, AI and voice failures are logged. Caddy writes structured access logs. *Gap:* there is no pager or alerting integration yet. |
 | **A10 Mishandling of Exceptional Conditions** | Every external call has a timeout (Gemini 12 s, uplink 5 s, database connect 8 s) and a defined fallback. Errors return a short reason, never a stack trace. A database failure answers 503 so nodes retry instead of losing data. A torn last line in a node's log is skipped, not fatal. |
 

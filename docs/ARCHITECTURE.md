@@ -133,7 +133,7 @@ flowchart TB
 
 ## The data model
 
-Everything is an event. There are five kinds.
+Everything is an event. There are seven kinds.
 
 | Kind | Meaning | Created by |
 | - | - | - |
@@ -142,6 +142,8 @@ Everything is an event. There are five kinds.
 | `ack` | Someone is on the way. Points at the `help` event it answers | A node console, or the city |
 | `note` | Free text about a household, 280 characters at most | A node console |
 | `reply` | A neighbour's Porch Circles quick reply (`omw`, `cant`, `generator`, `blocked`) | A node on the street |
+| `notice` | Bilingual city broadcast (`en`, `fr`, severity) | The city only |
+| `alive` | Sign of life (reserved; no extra payload yet) | A node or the city |
 
 State is a **projection**: a pure function from the set of events to incidents and household statuses. There is no mutable state to fall out of sync.
 

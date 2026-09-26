@@ -37,9 +37,9 @@ export function createCityStub(
   identity: NodeIdentity;
   clock: HybridClock;
 } {
-  const store = new EventStore();
   const identity = generateIdentity();
   const clock = new HybridClock(identity.id);
+  const store = new EventStore(undefined, () => ({ cityOrigin: identity.id }));
   const down = { value: false };
   const expected = Buffer.from(`Bearer ${token}`);
   const server = createServer((req, res) => {
@@ -68,12 +68,13 @@ export function createCityStub(
           else rejected.push({ id, reason: r.reason });
         }
         // omitCityEvents mimics older city builds that only returned accepted/duplicates/rejected.
-        if (opts.omitCityEvents) return sendJson(res, 200, { accepted, duplicates, rejected });
+        if (opts.omitCityEvents) return sendJson(res, 200, { accepted, duplicates, rejected, cityId: identity.id });
         return sendJson(res, 200, {
           accepted,
           duplicates,
           rejected,
           cityEvents: cityEventsDownlink(store, identity.id),
+          cityId: identity.id,
         });
       }
       if (req.method === "GET" && url.pathname === "/api/summary") {

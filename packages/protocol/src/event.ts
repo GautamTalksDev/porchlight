@@ -8,6 +8,10 @@ export const PROTOCOL_VERSION = 1 as const;
 export const MAX_NOTE_LENGTH = 280;
 /** Neighbour reply text on the mesh: short enough to read on a phone in the dark. */
 export const MAX_REPLY_NOTE_LENGTH = 140;
+export const MAX_NOTICE_EN_LENGTH = 280;
+export const MAX_NOTICE_FR_LENGTH = 320;
+/** Household slug used for city-wide notices (and later city alive pings). */
+export const CITY_BROADCAST_HOUSEHOLD = "city-hall";
 /** Reject events stamped further in the future than this. Offline clocks drift, so be generous but bounded. */
 export const DEFAULT_MAX_FUTURE_SKEW_MS = 15 * 60 * 1000;
 
@@ -17,12 +21,13 @@ const b64urlPub = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const b64urlSig = z.string().regex(/^[A-Za-z0-9_-]{86}$/);
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/);
 // Printable text only: no control characters, so notes can't smuggle terminal escapes or break log lines.
+const noControl = (s: string) => !/[\u0000-\u001f\u007f]/.test(s);
 const safeText = z
   .string()
   .max(MAX_NOTE_LENGTH)
-  .refine((s) => !/[\u0000-\u001f\u007f]/.test(s), "control characters are not allowed");
+  .refine(noControl, "control characters are not allowed");
 
-export const EventKind = z.enum(["help", "ok", "ack", "note", "reply"]);
+export const EventKind = z.enum(["help", "ok", "ack", "note", "reply", "notice", "alive"]);
 export type EventKind = z.infer<typeof EventKind>;
 
 export const ReplyCode = z.enum(["omw", "cant", "generator", "blocked"]);
@@ -34,6 +39,24 @@ export const REPLY_LABELS: Record<ReplyCode, string> = {
   generator: "I have a generator",
   blocked: "Road blocked",
 };
+
+export const NoticeSeverity = z.enum(["info", "urgent"]);
+export type NoticeSeverity = z.infer<typeof NoticeSeverity>;
+
+export const NoticePayload = z.strictObject({
+  en: z
+    .string()
+    .min(1)
+    .max(MAX_NOTICE_EN_LENGTH)
+    .refine(noControl, "control characters are not allowed"),
+  fr: z
+    .string()
+    .min(1)
+    .max(MAX_NOTICE_FR_LENGTH)
+    .refine(noControl, "control characters are not allowed"),
+  severity: NoticeSeverity,
+});
+export type NoticePayload = z.infer<typeof NoticePayload>;
 
 export const EventSource = z.strictObject({
   type: z.enum(["beacon", "console", "sim"]),
@@ -53,6 +76,8 @@ export const EventBody = z.strictObject({
   /** Household that authored a neighbour reply (Porch Circles). */
   actor: slug.optional(),
   reply: ReplyCode.optional(),
+  /** City broadcast notice (Porchlight city notices). */
+  notice: NoticePayload.optional(),
   source: EventSource,
   lang: z.enum(["en", "fr"]).optional(),
   note: safeText.optional(),
@@ -69,6 +94,7 @@ export interface NewEventFields {
   ref?: string;
   actor?: string;
   reply?: ReplyCode;
+  notice?: NoticePayload;
   source: z.infer<typeof EventSource>;
   lang?: "en" | "fr";
   note?: string;
@@ -88,8 +114,15 @@ function assertReplyFields(fields: NewEventFields): void {
   }
 }
 
+function assertNoticeFields(fields: NewEventFields): void {
+  if (fields.kind !== "notice") return;
+  if (!fields.notice) throw new Error("notice events need a notice payload");
+  NoticePayload.parse(fields.notice);
+}
+
 export function createEvent(identity: NodeIdentity, clock: HybridClock, fields: NewEventFields): SignedEvent {
   assertReplyFields(fields);
+  assertNoticeFields(fields);
   const body: EventBody = EventBody.parse({
     v: PROTOCOL_VERSION,
     origin: identity.id,
@@ -105,6 +138,9 @@ export function createEvent(identity: NodeIdentity, clock: HybridClock, fields: 
       throw new Error(`reply text must be at most ${MAX_REPLY_NOTE_LENGTH} characters`);
     }
   }
+  if (body.kind === "notice") {
+    if (!body.notice) throw new Error("notice events need a notice payload");
+  }
   const canonical = canonicalize(body);
   const id = createHash("sha256").update(canonical).digest("hex");
   const sig = signBytes(identity, Buffer.from(canonical));
@@ -118,6 +154,13 @@ export interface VerifyOptions {
   maxFutureSkewMs?: number;
   /** If set, only events from these node ids are accepted (the neighbourhood roster). */
   allowedOrigins?: ReadonlySet<string>;
+  /**
+   * When set, notice events must be signed by this city origin.
+   * When null or unset, notices are rejected (the City has not been pinned yet).
+   */
+  cityOrigin?: string | null;
+  /** Called once when a notice is rejected for not being signed by the pinned City. */
+  onNoticeRejected?: () => void;
 }
 
 /** Full verification of an untrusted event. Never trust a peer: check shape, identity, hash, and signature. */
@@ -139,6 +182,13 @@ export function verifyEvent(input: unknown, opts: VerifyOptions = {}): VerifyRes
     if (!ev.reply || !ev.ref || !ev.actor) return { ok: false, reason: "reply without reply, ref or actor" };
     if (ev.note !== undefined && ev.note.length > MAX_REPLY_NOTE_LENGTH) {
       return { ok: false, reason: "reply text too long" };
+    }
+  }
+  if (ev.kind === "notice") {
+    if (!ev.notice) return { ok: false, reason: "notice without payload" };
+    if (!opts.cityOrigin || ev.origin !== opts.cityOrigin) {
+      opts.onNoticeRejected?.();
+      return { ok: false, reason: "notice not signed by the City" };
     }
   }
   const { id, sig, ...body } = ev;

@@ -74,6 +74,8 @@ export class NodeAgent {
   private uplinkBackoffMs = 0;
   private uplinkNextAt = 0;
   private uplinkPersistTimer?: NodeJS.Timeout;
+  /** Pinned city origin: only this signer may create notice events. */
+  private cityOrigin: string | null = null;
   uplinkMode: UplinkMode;
   uplinkLastOkAt?: number;
   uplinkLastError?: string;
@@ -88,7 +90,11 @@ export class NodeAgent {
     const persist = opts.persist ?? true;
     this.store = new EventStore(
       persist ? new JsonlFileAdapter(join(config.dataDir, "events.jsonl")) : new MemoryAdapter(),
-      () => ({ allowedOrigins: config.roster }),
+      () => ({
+        allowedOrigins: config.roster,
+        cityOrigin: this.cityOrigin,
+        onNoticeRejected: () => console.warn("[node] rejected a notice not signed by the City"),
+      }),
     );
     this.clock = new HybridClock(identity.id);
     this.chaosDrop = config.chaosDrop;
@@ -98,6 +104,7 @@ export class NodeAgent {
     for (const [beaconId, b] of Object.entries(config.households.beacons)) {
       this.beacons.set(beaconId, { beaconId, household: b.household });
     }
+    this.cityOrigin = config.cityId ?? this.loadPinnedCityId();
     if (persist) this.loadUplinked();
     // Keep the HLC ahead of everything we have seen, and seed the replay guard from history.
     for (const ev of this.store.all()) this.observe(ev);
@@ -377,16 +384,33 @@ export class NodeAgent {
     if (!cityUrl || this.uplinkMode === "cut") return;
     if (Date.now() < this.uplinkNextAt) return;
     const pending = this.pendingUplink().slice(0, 250);
+    const heldNotices = this.store
+      .all()
+      .filter((e) => e.kind === "notice" && this.cityOrigin && e.origin === this.cityOrigin)
+      .map((e) => e.id)
+      .slice(0, 200);
     this.uplinkNextAt = Date.now() + this.config.uplinkIntervalMs;
     try {
       const res = await fetch(`${cityUrl}/api/ingest`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.config.cityToken}` },
-        body: JSON.stringify({ node: { id: this.identity.id, name: this.config.name }, events: pending }),
+        body: JSON.stringify({
+          node: { id: this.identity.id, name: this.config.name },
+          events: pending,
+          heldNotices,
+        }),
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`city ingest → HTTP ${res.status}`);
-      const body = (await res.json()) as { accepted?: string[]; duplicates?: string[]; cityEvents?: unknown };
+      const body = (await res.json()) as {
+        accepted?: string[];
+        duplicates?: string[];
+        cityEvents?: unknown;
+        cityId?: unknown;
+      };
+      if (typeof body.cityId === "string" && /^[0-9a-f]{16}$/.test(body.cityId)) {
+        this.pinCityId(body.cityId);
+      }
       for (const id of [...(body.accepted ?? []), ...(body.duplicates ?? [])]) this.uplinked.add(id);
       // Downlink must never fail the delivery: missing or malformed cityEvents are an empty list,
       // and each bad event is skipped so accepted uploads still count as delivered.
@@ -428,6 +452,28 @@ export class NodeAgent {
       this.uplinkBackoffMs = Math.min(30_000, Math.max(1000, this.uplinkBackoffMs * 2));
       this.uplinkNextAt = Date.now() + this.uplinkBackoffMs * (0.75 + Math.random() * 0.5);
       this.changed();
+    }
+  }
+
+  private loadPinnedCityId(): string | null {
+    const path = join(this.config.dataDir, "city-id.json");
+    if (!existsSync(path)) return null;
+    try {
+      const raw = JSON.parse(readFileSync(path, "utf8")) as { cityId?: unknown };
+      if (typeof raw.cityId === "string" && /^[0-9a-f]{16}$/.test(raw.cityId)) return raw.cityId;
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  private pinCityId(cityId: string): void {
+    if (this.cityOrigin === cityId) return;
+    this.cityOrigin = cityId;
+    try {
+      writeFileSync(join(this.config.dataDir, "city-id.json"), JSON.stringify({ cityId }), { mode: 0o600 });
+    } catch {
+      /* non-fatal: in-memory pin still works until restart */
     }
   }
 

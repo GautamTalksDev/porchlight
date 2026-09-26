@@ -17,6 +17,8 @@ const EnvSchema = z.object({
   PEERS: z.string().default(""),
   CITY_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
   CITY_INGEST_TOKEN: z.string().default(""),
+  /** Optional pinned city origin id (16 hex). When empty, the node learns it from the first uplink. */
+  CITY_ID: z.string().regex(/^[0-9a-f]{16}$/).optional().or(z.literal("").transform(() => undefined)),
   NETWORK_KEY: z.string().default(""),
   ROSTER: z.string().default(""),
   BEACON_KEYS: z.string().default(""),
@@ -62,6 +64,8 @@ export interface NodeConfig {
   peers: string[];
   cityUrl?: string;
   cityToken: string;
+  /** Optional pre-pinned city origin id for accepting notices before the first uplink. */
+  cityId?: string;
   networkKey: string;
   roster?: Set<string>;
   beaconKeys: Map<string, Uint8Array>;
@@ -111,6 +115,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     peers: e.PEERS.split(",").map((s) => s.trim().replace(/\/$/, "")).filter(Boolean),
     cityUrl: e.CITY_URL?.replace(/\/$/, ""),
     cityToken: e.CITY_INGEST_TOKEN,
+    cityId: e.CITY_ID,
     networkKey: e.NETWORK_KEY,
     roster: roster.length ? new Set(roster) : undefined,
     beaconKeys: parseBeaconKeys(e.BEACON_KEYS),

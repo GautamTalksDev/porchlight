@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 const Body = z.object({
   node: z.object({ id: z.string().regex(/^[0-9a-f]{16}$/), name: z.string().regex(/^[a-z0-9-]{2,32}$/) }),
   events: z.array(z.unknown()).max(250),
+  /** City notice ids this node already holds (proof of delivery). */
+  heldNotices: z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(200).optional(),
 });
 
 function tokenOk(header: string | null): boolean {
@@ -33,7 +35,7 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, reason: "invalid batch" }, { status });
   }
   try {
-    return Response.json(await ingest(body.node, body.events));
+    return Response.json(await ingest(body.node, body.events, body.heldNotices ?? []));
   } catch (err) {
     console.error("[ingest] storage failed, node will retry:", (err as Error).message);
     return Response.json({ ok: false, reason: "storage unavailable, retry later" }, { status: 503 });

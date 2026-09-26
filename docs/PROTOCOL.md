@@ -81,8 +81,8 @@ Nodes and the city speak only in signed events. An event is JSON:
 | Field | Rule |
 | - | - |
 | `v` | Protocol version, always `1` |
-| `kind` | `help`, `ok`, `ack`, `note` or `reply` |
-| `household` | Lowercase slug from the household roster |
+| `kind` | `help`, `ok`, `ack`, `note`, `reply`, `notice` or `alive` |
+| `household` | Lowercase slug from the household roster (`city-hall` for city-wide notices) |
 | `origin` | The creating node's id: the first 16 hex characters of SHA 256 of its public key |
 | `pub` | The creating node's Ed25519 public key, base64url |
 | `hlc` | Hybrid logical clock: wall time in milliseconds, a logical counter, and the node id |
@@ -90,6 +90,7 @@ Nodes and the city speak only in signed events. An event is JSON:
 | `ref` | For `ack` and `reply`: the id of the `help` event being answered |
 | `actor` | For `reply`: the household that sent the neighbour reply |
 | `reply` | For `reply`: one of `omw`, `cant`, `generator`, `blocked` |
+| `notice` | For `notice`: `{ en, fr, severity }` with English 1 to 280 chars, French 1 to 320, severity `info` or `urgent` |
 | `source` | `beacon`, `console` or `sim`, with the beacon id and signal strength when known |
 | `note` | Printable text only, 280 characters at most (140 for `reply`), no control characters |
 | `id` | SHA 256 of the canonical JSON of every field above |
@@ -100,6 +101,10 @@ Nodes and the city speak only in signed events. An event is JSON:
 ### Neighbour replies (Porch Circles)
 
 A `reply` event is how a neighbour answers a call on the mesh without the city. It references the `help` event (`ref`), names the responding household (`actor`), and carries a reply code: `omw` (On my way), `cant` (Can't go), `generator` (I have a generator), or `blocked` (Road blocked). Optional free text is capped at 140 characters. `omw` also creates a normal `ack` so the beacon turns green. Replies gossip like every other event and work while the city link is cut.
+
+### City notices
+
+A `notice` event is a bilingual broadcast from the city to every node on the street: English (1 to 280 characters), French (1 to 320), and a severity of `info` or `urgent`. The household field is `city-hall`. Only the city's signing identity may create notices. Each node pins the city's origin id (`cityId`) from its first successful ingest response (or from optional `CITY_ID`), persists it next to `identity.json`, and then rejects any notice whose `origin` is not that id, whether it arrived by downlink or gossip. That keeps a compromised neighbourhood node from faking a city alert. An `alive` kind is reserved for later signs of life; it carries no extra payload beyond the normal event fields.
 
 ### Verifying an event
 
