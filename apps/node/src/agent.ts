@@ -314,15 +314,24 @@ export class NodeAgent {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`city ingest → HTTP ${res.status}`);
-      const body = (await res.json()) as { accepted?: string[]; duplicates?: string[] };
+      const body = (await res.json()) as { accepted?: string[]; duplicates?: string[]; cityEvents?: unknown[] };
       for (const id of [...(body.accepted ?? []), ...(body.duplicates ?? [])]) this.uplinked.add(id);
+      let gotCity = false;
+      for (const raw of body.cityEvents ?? []) {
+        const r = this.store.add(raw);
+        if (r.added || r.reason === "duplicate") {
+          const id = String((raw as { id?: unknown })?.id ?? "");
+          if (id) this.uplinked.add(id);
+          if (r.added) gotCity = true;
+        }
+      }
       const was = this.uplinkMode;
       if ((this.uplinkMode as UplinkMode) !== "cut") this.uplinkMode = "online";
       this.uplinkLastOkAt = Date.now();
       this.uplinkLastError = undefined;
       this.uplinkBackoffMs = 0;
-      if (pending.length) this.schedulePersistUplinked();
-      if (was !== this.uplinkMode || pending.length) this.changed();
+      if (pending.length || gotCity) this.schedulePersistUplinked();
+      if (was !== this.uplinkMode || pending.length || gotCity) this.changed();
       // Drain a backlog quickly after an outage.
       if (pending.length === 250) this.uplinkNextAt = 0;
     } catch (err) {

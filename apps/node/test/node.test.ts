@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { FALL_NOTE, bytesToHex, encodeFrame, generateIdentity, hexToBytes } from "@porchlight/protocol";
+import { FALL_NOTE, bytesToHex, createEvent, encodeFrame, generateIdentity, hexToBytes } from "@porchlight/protocol";
 import { NodeAgent } from "../src/agent";
 import { createCityStub } from "../src/city-stub";
 import { loadConfig } from "../src/config";
@@ -146,5 +146,25 @@ describe("three nodes and a city", () => {
     await until(() => nodes[0]!.agent.state().incidents.some((i) => i.key === "pl-b01:00001234:5" && i.note === FALL_NOTE));
     const inc = nodes[0]!.agent.state().incidents.find((i) => i.key === "pl-b01:00001234:5")!;
     assert.equal(inc.status, "open");
+  });
+
+  it("a city-signed ack on uplink reaches the node and then neighbours by gossip", async () => {
+    await new Promise((r) => setTimeout(r, 900));
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 6));
+    const res = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -55 });
+    assert.equal(res.status, 200);
+    const incidentKey = "pl-b01:00001234:6";
+    await until(() => city.store.all().some((e) => e.kind === "help" && e.incident === incidentKey));
+    const help = city.store.all().find((e) => e.kind === "help" && e.incident === incidentKey)!;
+    const ack = createEvent(city.identity, city.clock, {
+      kind: "ack",
+      household: "hh-maple-12",
+      ref: help.id,
+      source: { type: "console" },
+      lang: "en",
+    });
+    assert.equal(city.store.add(ack).added, true);
+    await until(() => nodes[0]!.agent.state().incidents.some((i) => i.key === incidentKey && i.status === "acknowledged"));
+    await until(() => nodes[1]!.agent.state().incidents.some((i) => i.key === incidentKey && i.status === "acknowledged"));
   });
 });

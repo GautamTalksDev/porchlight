@@ -458,7 +458,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                       <li key={t.id} data-kind={t.kind}>
                         <span className="trail-time mono">{clock(t.at)}</span>
                         <span className="trail-body">
-                          <strong>{KIND_TEXT[t.kind] ?? t.kind}</strong>
+                          <strong>{t.kind === "help" && isFall(t.note ?? undefined) ? "Possible fall" : KIND_TEXT[t.kind] ?? t.kind}</strong>
                           <span>
                             Signed by {t.by}
                             {t.source === "beacon" && t.beacon ? ` from beacon ${t.beacon}` : ""}.{" "}

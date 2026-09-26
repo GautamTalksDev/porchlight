@@ -1,12 +1,14 @@
 import "server-only";
 import {
   EventStore,
+  compareHlc,
   createEvent,
   decodeHlc,
   project,
   verifyEvent,
   type SignedEvent,
 } from "@porchlight/protocol";
+import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
 import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
 import { NEED_LABELS, registry } from "./registry";
@@ -80,6 +82,20 @@ export interface IngestResult {
   accepted: string[];
   duplicates: string[];
   rejected: { id: string; reason: string }[];
+  /** City-signed decisions for the street: oldest first, last 24 hours, at most 200. */
+  cityEvents: SignedEvent[];
+}
+
+/** City-origin events the node should pull down and gossip to neighbours. */
+function cityEventsDownlink(): SignedEvent[] {
+  const c = city();
+  const cityId = cityIdentity().identity.id;
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  return c.store
+    .all()
+    .filter((e) => e.origin === cityId && decodeHlc(e.hlc).wall >= cutoff)
+    .sort((a, b) => compareHlc(a.hlc, b.hlc))
+    .slice(0, 200);
 }
 
 /**
@@ -89,7 +105,7 @@ export interface IngestResult {
 export async function ingest(node: { id: string; name: string }, raw: unknown[]): Promise<IngestResult> {
   const c = city();
   await c.ready;
-  const result: IngestResult = { accepted: [], duplicates: [], rejected: [] };
+  const result: IngestResult = { accepted: [], duplicates: [], rejected: [], cityEvents: [] };
   const fresh: SignedEvent[] = [];
   for (const item of raw) {
     const id = String((item as { id?: unknown })?.id ?? "").slice(0, 64);
@@ -130,6 +146,7 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
   if (delivered.length) {
     emit({ type: "delivery", node, events: delivered.map((e) => ({ id: e.id, kind: e.kind, household: e.household, origin: e.origin, incident: e.incident })) });
   }
+  result.cityEvents = cityEventsDownlink();
   return result;
 }
 
@@ -150,13 +167,24 @@ export async function cityAction(kind: "ok" | "ack", household: string, opts: { 
   const base = { household, source: { type: "console" as const }, lang: reg.lang, note: opts.note?.slice(0, 280) };
   let events: SignedEvent[];
   if (kind === "ack") {
-    // A home can have several open calls if the beacon was pressed again. Answer all of them.
-    const open = project(c.store.all()).incidents.filter((i) => i.household === household && i.status === "open");
-    if (!open.length) {
-      if (project(c.store.all()).incidents.some((i) => i.household === household && i.status === "acknowledged")) return null;
-      throw new Error("no open call for help at this household");
+    const decision = decideAck(project(c.store.all()).incidents, household);
+    if (decision.action === "already") return null;
+    if (decision.action === "ack") {
+      // A home can have several open calls if the beacon was pressed again. Answer all of them.
+      events = decision.eventIds.map((ref) => createEvent(identity, clock, { ...base, kind: "ack", ref }));
+    } else {
+      // Resident said they are not safe during a voice check-in with no open card: open one and dispatch.
+      const help = createEvent(identity, clock, {
+        household,
+        source: { type: "console" },
+        lang: reg.lang,
+        kind: "help",
+        incident: `voice-${identity.id}-${Date.now().toString(36)}`,
+        note: VOICE_ESCALATION_NOTE,
+      });
+      const ack = createEvent(identity, clock, { ...base, kind: "ack", ref: help.id });
+      events = [help, ack];
     }
-    events = open.map((inc) => createEvent(identity, clock, { ...base, kind: "ack", ref: inc.eventId }));
   } else {
     events = [createEvent(identity, clock, { ...base, kind: "ok" })];
   }
@@ -223,7 +251,7 @@ export async function snapshot() {
   // Provenance for each home: who signed each event, how it reached the city, newest first.
   const nameOf = new Map([...c.nodes.values()].map((n) => [n.id, n.name]));
   const cityId = cityIdentity().identity.id;
-  const trail: Record<string, { id: string; kind: string; at: number; by: string; via: string | null; source: string; beacon: string | null }[]> = {};
+  const trail: Record<string, { id: string; kind: string; at: number; by: string; via: string | null; source: string; beacon: string | null; note: string | null }[]> = {};
   for (const e of events) {
     const list = (trail[e.household] ??= []);
     list.push({
@@ -234,6 +262,7 @@ export async function snapshot() {
       via: c.deliveredBy.get(e.id) ?? null,
       source: e.source.type,
       beacon: e.source.beacon ?? null,
+      note: e.note ?? null,
     });
   }
   for (const k of Object.keys(trail)) trail[k] = trail[k]!.sort((a, b) => b.at - a.at).slice(0, 8);

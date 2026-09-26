@@ -126,6 +126,7 @@ flowchart TB
 
 * **Write first, then acknowledge.** An event is in Tiger Data before the node is told it arrived.
 * **The city signs its own actions.** When a coordinator or the voice agent marks someone safe, that becomes an Ed25519 signed event from the city's identity, stored like any other. Every change is attributable.
+* **The city acts like another neighbour for its own decisions.** Each ingest reply includes recent city-signed events. Nodes verify them, keep them, and gossip them onward, so a dispatch or mark-safe made in the operations room clears the same call on every node console.
 * **Analytics come from TimescaleDB.** The last hour timeline reads a continuous aggregate (`events_per_minute`) with real-time blending. On plain PostgreSQL the same numbers are computed on the fly.
 
 ## The data model

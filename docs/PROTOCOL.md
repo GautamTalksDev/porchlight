@@ -139,13 +139,13 @@ Content-Type: application/json
 
 | Response | Meaning | What the node does |
 | - | - | - |
-| `200` with `accepted`, `duplicates`, `rejected` | Stored durably | Marks accepted and duplicate ids as delivered |
+| `200` with `accepted`, `duplicates`, `rejected`, `cityEvents` | Stored durably; `cityEvents` are city-signed decisions from the last 24 hours (at most 200, oldest first) | Marks accepted and duplicate ids as delivered; verifies each city event, adds it to the local store, marks it delivered so it is never uploaded back, then gossips it to neighbours |
 | `401` | Wrong token | Keeps everything and retries later |
 | `413` | Batch over 1 MB | Sends a smaller batch |
 | `429` | Too many requests | Backs off |
 | `503` | City link or database down | Keeps everything, backs off up to 30 seconds with jitter |
 
-The city writes to the database before it answers, and inserts with `ON CONFLICT DO NOTHING`, so retries are always safe.
+The city writes to the database before it answers, and inserts with `ON CONFLICT DO NOTHING`, so retries are always safe. City-signed actions (dispatch, mark safe, voice escalations) ride back down in `cityEvents`, so the street sees the same decisions the operations room made.
 
 ## 5. Projection rules
 

@@ -1,16 +1,42 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { EventStore, project } from "@porchlight/protocol";
+import {
+  EventStore,
+  HybridClock,
+  compareHlc,
+  decodeHlc,
+  generateIdentity,
+  project,
+  type NodeIdentity,
+  type SignedEvent,
+} from "@porchlight/protocol";
 import { HttpError, readBody, parseJson, sendJson } from "./net";
+
+function cityEventsDownlink(store: EventStore, cityId: string): SignedEvent[] {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  return store
+    .all()
+    .filter((e) => e.origin === cityId && decodeHlc(e.hlc).wall >= cutoff)
+    .sort((a, b) => compareHlc(a.hlc, b.hlc))
+    .slice(0, 200);
+}
 
 /**
  * A minimal stand-in for the city ingest API, for local development and tests.
  * The real city app (apps/city) implements the same contract with Tiger Data behind it.
  *   POST /api/ingest  Authorization: Bearer <token>  { node: {id, name}, events: SignedEvent[] }
- *   → { accepted: string[], duplicates: string[], rejected: {id, reason}[] }
+ *   → { accepted: string[], duplicates: string[], rejected: {id, reason}[], cityEvents: SignedEvent[] }
  */
-export function createCityStub(token: string): { server: Server; store: EventStore; down: { value: boolean } } {
+export function createCityStub(token: string): {
+  server: Server;
+  store: EventStore;
+  down: { value: boolean };
+  identity: NodeIdentity;
+  clock: HybridClock;
+} {
   const store = new EventStore();
+  const identity = generateIdentity();
+  const clock = new HybridClock(identity.id);
   const down = { value: false };
   const expected = Buffer.from(`Bearer ${token}`);
   const server = createServer((req, res) => {
@@ -38,7 +64,12 @@ export function createCityStub(token: string): { server: Server; store: EventSto
           else if (r.reason === "duplicate") duplicates.push(id);
           else rejected.push({ id, reason: r.reason });
         }
-        return sendJson(res, 200, { accepted, duplicates, rejected });
+        return sendJson(res, 200, {
+          accepted,
+          duplicates,
+          rejected,
+          cityEvents: cityEventsDownlink(store, identity.id),
+        });
       }
       if (req.method === "GET" && url.pathname === "/api/summary") {
         return sendJson(res, 200, { events: store.size, ...project(store.all()) });
@@ -49,5 +80,5 @@ export function createCityStub(token: string): { server: Server; store: EventSto
       sendJson(res, status, { ok: false, reason: err instanceof Error ? err.message : "error" });
     });
   });
-  return { server, store, down };
+  return { server, store, down, identity, clock };
 }
