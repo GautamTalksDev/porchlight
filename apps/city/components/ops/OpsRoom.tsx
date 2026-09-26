@@ -202,19 +202,20 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
 
   const voiceBusy = voice.state !== "idle" && voice.state !== "error";
   const copilotBusy = copilot.state !== "idle" && copilot.state !== "error";
+  const copilotOpen = copilot.state !== "idle";
 
   const startCopilot = useCallback(async () => {
     if (!copilot.available || voiceBusy) return;
     await voice.end();
     await copilot.start();
-  }, [copilot, voice, voiceBusy]);
+  }, [copilot.available, copilot.start, voice.end, voiceBusy]);
 
   const startResidentCall = useCallback(
     async (householdId: string, incidentKey: string | null) => {
-      if (copilotBusy) await copilot.end();
+      if (copilotBusy || copilotOpen) await copilot.end();
       await voice.start(householdId, incidentKey);
     },
-    [copilot, copilotBusy, voice],
+    [copilot.end, copilotBusy, copilotOpen, voice.start],
   );
 
   // The arrival moment: a new call for help gets a chime, a banner, and the camera.
@@ -315,12 +316,12 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
       const key = e.key.toLowerCase();
       if (key === "j" && items.length) choose(items[Math.min(items.length - 1, idx + 1)]!.household);
       else if (key === "k" && items.length) choose(items[Math.max(0, idx - 1)]!.household);
-      else if (key === "c" && household && !copilotBusy) void startResidentCall(household.id, incident?.key ?? null);
+      else if (key === "c" && household && !copilotBusy && !copilotOpen) void startResidentCall(household.id, incident?.key ?? null);
       else if (key === "v" && copilot.available && !voiceBusy) void startCopilot();
       else if (key === "d" && incident?.status === "open") void act("ack");
       else if (key === "s" && household) void act("ok");
       else if (key === "escape") {
-        if (copilotBusy) void copilot.end();
+        if (copilotOpen) void copilot.end();
         else {
           setSelected("");
           cityRef.current?.focus("ops");
@@ -330,7 +331,21 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [triage, selectedId, household, incident, voiceBusy, copilotBusy, copilot, act, choose, startCopilot, startResidentCall]);
+  }, [
+    triage,
+    selectedId,
+    household,
+    incident,
+    voiceBusy,
+    copilotBusy,
+    copilotOpen,
+    copilot.available,
+    copilot.end,
+    act,
+    choose,
+    startCopilot,
+    startResidentCall,
+  ]);
 
   useEffect(() => {
     if (!notice) return;
@@ -453,7 +468,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
           </button>
         ) : null}
 
-        {copilotBusy || copilot.state === "connecting" || (copilot.state === "error" && copilot.lines.length > 0) ? (
+        {copilotOpen ? (
           <div className="copilot-panel glass" role="dialog" aria-label="Hey Porchlight">
             <div className="copilot-orb" data-mode={copilot.state} aria-hidden="true" />
             <div className="copilot-body">
@@ -467,19 +482,31 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                   error: copilot.error ?? "Something went wrong",
                 }[copilot.state]}
               </p>
+              {copilot.state === "error" ? (
+                <div className="copilot-actions">
+                  <button className="btn btn-porch btn-small" type="button" onClick={() => void startCopilot()}>
+                    Try again
+                  </button>
+                  <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>
+                    End
+                  </button>
+                </div>
+              ) : null}
               {copilot.lines.length ? (
                 <ol className="transcript copilot-transcript" aria-live="polite">
                   {copilot.lines.map((l, i) => (
                     <li key={i} className="line" data-who={l.who}>{l.text}</li>
                   ))}
                 </ol>
-              ) : (
+              ) : copilot.state !== "error" ? (
                 <p className="section-sub">Say what you need. Try “who needs help” or “show Maple”.</p>
-              )}
+              ) : null}
             </div>
-            <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>
-              End
-            </button>
+            {copilot.state !== "error" ? (
+              <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>
+                End
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -631,6 +658,20 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                 <p className="voice-state" data-live={String(["speaking", "listening", "playing"].includes(voice.state))}>
                   {{ idle: "No call in progress.", connecting: "Connecting…", speaking: "Agent is speaking", listening: "Listening to the resident", playing: "Playing the opening line", error: voice.error ?? "The call failed." }[voice.state]}
                 </p>
+                {voice.state === "error" ? (
+                  <div className="copilot-actions">
+                    <button
+                      className="btn btn-porch btn-small"
+                      type="button"
+                      onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
+                    >
+                      Try again
+                    </button>
+                    <button className="btn btn-quiet btn-small" type="button" onClick={() => void voice.end()}>
+                      End call
+                    </button>
+                  </div>
+                ) : null}
                 {voice.error && voice.state !== "error" ? <p className="section-sub">{voice.error}</p> : null}
                 {voice.lines.length ? (
                   <ol className="transcript" aria-live="polite">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { buildOverview, resolveHousehold } from "@/lib/copilot";
 import type { CitySnapshot } from "@/lib/city";
 import type { TriageResult } from "@/lib/triage";
@@ -18,15 +18,39 @@ export interface CopilotLive {
   nodesTotal: number;
 }
 
+type Conv = { endSession: () => Promise<void> };
+
+type DisconnectDetails =
+  | { reason: "error"; message: string; closeReason?: string }
+  | { reason: "agent"; closeReason?: string }
+  | { reason: "user" };
+
+type SessionPayload = {
+  signedUrl: string;
+  firstMessage: string;
+  dynamicVariables: Record<string, string | number>;
+};
+
 async function post(path: string, body: unknown): Promise<Response> {
   return fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
 const UNKNOWN = "I could not find that address on this street.";
 
+function disconnectReason(details: DisconnectDetails): string {
+  if (details.reason === "error") return details.message || details.closeReason || "error";
+  if (details.reason === "agent") return details.closeReason || "agent ended the session";
+  return "ended by user";
+}
+
+function mentionsOverrideOrPermission(reason: string): boolean {
+  const r = reason.toLowerCase();
+  return r.includes("override") || r.includes("permission");
+}
+
 /**
- * Hey Porchlight: a coordinator voice copilot. Tools always read the latest street state through
- * refs so replies stay fresh. Every tool call is shown in the transcript.
+ * Hey Porchlight: a coordinator voice copilot. The Conversation lives in a ref and is only ended
+ * on End, a start_check_in handoff, or page unmount. OpsRoom re-renders must never tear it down.
  */
 export function useCopilot(opts: {
   liveRef: MutableRefObject<CopilotLive>;
@@ -39,65 +63,75 @@ export function useCopilot(opts: {
   const [state, setState] = useState<"idle" | "connecting" | "speaking" | "listening" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState(true);
-  const conv = useRef<{ endSession: () => Promise<void> } | null>(null);
+
+  const conv = useRef<Conv | null>(null);
+  const intentionalEnd = useRef(false);
+  const starting = useRef(false);
+  const retriedWithoutOverrides = useRef(false);
+  const sessionPayload = useRef<SessionPayload | null>(null);
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  const add = (l: CopilotLine) => setLines((prev) => [...prev.slice(-40), l]);
+  const addLine = useCallback((l: CopilotLine) => {
+    setLines((prev) => [...prev.slice(-40), l]);
+  }, []);
 
-  const end = useCallback(async () => {
+  const closeSession = useCallback(async (intentional: boolean) => {
+    intentionalEnd.current = intentional;
+    const c = conv.current;
+    conv.current = null;
+    if (!c) return;
     try {
-      await conv.current?.endSession();
+      await c.endSession();
     } catch {
       /* already closed */
     }
-    conv.current = null;
-    setState("idle");
   }, []);
 
-  const households = () => {
-    const snap = optsRef.current.liveRef.current.snap;
-    return (snap?.households ?? []).map((h) => ({ id: h.id, label: h.label }));
-  };
-
-  const find = (address: string | undefined) => {
-    if (!address?.trim()) return null;
-    return resolveHousehold(address, households());
-  };
-
-  const start = useCallback(async () => {
-    await end();
-    setLines([]);
+  const end = useCallback(async () => {
+    await closeSession(true);
+    sessionPayload.current = null;
+    retriedWithoutOverrides.current = false;
     setError(null);
-    setState("connecting");
-    const res = await post("/api/voice/copilot", {});
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const reason = data.reason ?? "Could not start Porchlight";
-      setState("error");
-      setError(reason);
-      if (res.status === 503) setAvailable(false);
-      return;
-    }
-    setAvailable(true);
-    const s = (await res.json()) as {
-      signedUrl: string;
-      firstMessage: string;
-      dynamicVariables: Record<string, string | number>;
+    setState("idle");
+  }, [closeSession]);
+
+  const endRef = useRef(end);
+  endRef.current = end;
+
+  // Tear down only when the page unmounts, never when OpsRoom re-renders every second.
+  useEffect(() => {
+    return () => {
+      intentionalEnd.current = true;
+      const c = conv.current;
+      conv.current = null;
+      void c?.endSession().catch(() => undefined);
     };
-    try {
+  }, []);
+
+  const openConversation = useCallback(
+    async (payload: SessionPayload, useOverrides: boolean): Promise<Conv> => {
       const { Conversation } = await import("@elevenlabs/client");
+      intentionalEnd.current = false;
+
       const tool = (label: string, reply: string) => {
-        add({ who: "tool", text: `${label}: ${reply}` });
+        addLine({ who: "tool", text: `${label}: ${reply}` });
         optsRef.current.onToolUsed();
         return reply;
       };
 
-      conv.current = await Conversation.startSession({
-        signedUrl: s.signedUrl,
+      const households = () =>
+        (optsRef.current.liveRef.current.snap?.households ?? []).map((h) => ({ id: h.id, label: h.label }));
+      const find = (address: string | undefined) => {
+        if (!address?.trim()) return null;
+        return resolveHousehold(address, households());
+      };
+
+      const session = await Conversation.startSession({
+        signedUrl: payload.signedUrl,
         connectionType: "websocket",
-        dynamicVariables: s.dynamicVariables,
-        overrides: { agent: { firstMessage: s.firstMessage } },
+        dynamicVariables: payload.dynamicVariables,
+        ...(useOverrides ? { overrides: { agent: { firstMessage: payload.firstMessage } } } : {}),
         clientTools: {
           get_overview: async () => {
             const live = optsRef.current.liveRef.current;
@@ -187,12 +221,11 @@ export function useCopilot(opts: {
             const live = optsRef.current.liveRef.current;
             const open = live.snap?.incidents.find((i) => i.household === hit.id && i.status !== "resolved");
             const reply = "Starting the check-in call now.";
-            add({ who: "tool", text: `Check in ${hit.label}: Starting the check-in call now.` });
+            addLine({ who: "tool", text: `Check in ${hit.label}: Starting the check-in call now.` });
             optsRef.current.onToolUsed();
-            // Give the agent a moment to speak the confirmation, then hand off to the resident call.
             setTimeout(() => {
               void (async () => {
-                await end();
+                await endRef.current();
                 optsRef.current.onSelect(hit.id);
                 optsRef.current.onStartCheckIn(hit.id, open?.key ?? null);
               })();
@@ -213,22 +246,112 @@ export function useCopilot(opts: {
           },
         },
         onMessage: (m) =>
-          add({
+          addLine({
             who: String((m as { role?: string }).role ?? m.source) === "user" ? "user" : "agent",
             text: m.message,
           }),
         onModeChange: ({ mode }) => setState(mode === "speaking" ? "speaking" : "listening"),
-        onDisconnect: () => setState("idle"),
-        onError: (message) => {
-          setError(String(message));
+        onDisconnect: (details: DisconnectDetails) => {
+          const reason = disconnectReason(details);
+          console.info("[copilot] disconnect:", reason, details);
+          if (intentionalEnd.current) {
+            setState("idle");
+            return;
+          }
+          conv.current = null;
+          if (!retriedWithoutOverrides.current && mentionsOverrideOrPermission(reason) && sessionPayload.current) {
+            retriedWithoutOverrides.current = true;
+            console.info("[copilot] retrying without overrides after:", reason);
+            void openConversation(sessionPayload.current, false)
+              .then((c) => {
+                conv.current = c;
+                setError(null);
+                setState("listening");
+              })
+              .catch((err) => {
+                console.info("[copilot] retry failed:", (err as Error).message);
+                setError(`The assistant disconnected: ${reason}`);
+                setState("error");
+              });
+            return;
+          }
+          setError(`The assistant disconnected: ${reason}`);
+          setState("error");
+        },
+        onError: (message, context) => {
+          console.info("[copilot] error:", message, context);
+          const text = String(message);
+          if (!retriedWithoutOverrides.current && mentionsOverrideOrPermission(text) && sessionPayload.current) {
+            retriedWithoutOverrides.current = true;
+            console.info("[copilot] retrying without overrides after error:", text);
+            void (async () => {
+              await closeSession(true);
+              try {
+                conv.current = await openConversation(sessionPayload.current!, false);
+                setError(null);
+                setState("listening");
+              } catch (err) {
+                setError(`The assistant disconnected: ${text}`);
+                setState("error");
+                console.info("[copilot] retry failed:", (err as Error).message);
+              }
+            })();
+            return;
+          }
+          setError(text);
           setState("error");
         },
       });
-    } catch (err) {
-      setError(`Porchlight unavailable (${(err as Error).message}).`);
-      setState("error");
+      return session as Conv;
+    },
+    [addLine, closeSession],
+  );
+
+  const start = useCallback(async () => {
+    if (starting.current) return;
+    starting.current = true;
+    try {
+      await closeSession(true);
+      setLines([]);
+      setError(null);
+      setState("connecting");
+      retriedWithoutOverrides.current = false;
+      const res = await post("/api/voice/copilot", {});
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const reason = data.reason ?? "Could not start Porchlight";
+        setState("error");
+        setError(reason);
+        if (res.status === 503) setAvailable(false);
+        return;
+      }
+      setAvailable(true);
+      const s = (await res.json()) as SessionPayload;
+      sessionPayload.current = s;
+      try {
+        conv.current = await openConversation(s, true);
+      } catch (err) {
+        const msg = (err as Error).message;
+        console.info("[copilot] error:", msg);
+        if (!retriedWithoutOverrides.current && mentionsOverrideOrPermission(msg)) {
+          retriedWithoutOverrides.current = true;
+          console.info("[copilot] retrying without overrides after start failure");
+          try {
+            conv.current = await openConversation(s, false);
+            return;
+          } catch (err2) {
+            setError(`Porchlight unavailable (${(err2 as Error).message}).`);
+            setState("error");
+            return;
+          }
+        }
+        setError(`Porchlight unavailable (${msg}).`);
+        setState("error");
+      }
+    } finally {
+      starting.current = false;
     }
-  }, [end]);
+  }, [closeSession, openConversation]);
 
   const checkAvailable = useCallback(async () => {
     const res = await post("/api/voice/copilot", { probe: true });

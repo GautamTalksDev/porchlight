@@ -375,6 +375,7 @@ kbd { font-family: "Atkinson Mono", ui-monospace, monospace; font-size: 0.75rem;
 .copilot-title { font-weight: 800; font-size: 1.05rem; }
 .copilot-state { color: #b3aec6; font-size: 0.85rem; }
 .copilot-transcript { max-height: 140px; }
+.copilot-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
 
 .trail { display: grid; gap: 0.75rem; border-top: 1px solid rgba(236, 230, 217, 0.12); padding-top: 1rem; }
 .trail ol { display: grid; gap: 0; }
