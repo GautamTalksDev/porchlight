@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { FALL_NOTE as PROTOCOL_FALL_NOTE } from "@porchlight/protocol";
+import { FALL_NOTE, isFall } from "../lib/fall.ts";
 import { collapseByHousehold, describeGeminiFailure, reconcile, ruleRanking, sanitizeNote, type TriageCase } from "../lib/triage-core.ts";
 
 const cases: TriageCase[] = [
@@ -71,5 +73,21 @@ describe("Gemini failure notes", () => {
       describeGeminiFailure("something else"),
       "Gemini is unavailable, so calls are ordered by the built-in rules.",
     );
+  });
+});
+
+describe("fall triage", () => {
+  it("ranks a fall case above an otherwise identical case without a fall", () => {
+    const pair: TriageCase[] = [
+      { ref: "R1", status: "open", waitMinutes: 5, witnesses: 1, needs: [], lang: "en" },
+      { ref: "R2", status: "open", waitMinutes: 5, witnesses: 1, needs: [], lang: "en", fall: true },
+    ];
+    assert.equal(ruleRanking(pair)[0]!.ref, "R2");
+    assert.match(ruleRanking(pair)[0]!.reason, /^possible fall, no button pressed/);
+  });
+  it("keeps the city FALL_NOTE identical to the protocol export", () => {
+    assert.equal(FALL_NOTE, PROTOCOL_FALL_NOTE);
+    assert.equal(isFall(FALL_NOTE), true);
+    assert.equal(isFall("other"), false);
   });
 });

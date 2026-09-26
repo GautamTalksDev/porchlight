@@ -3,7 +3,7 @@ import { siphash24, tagsEqual } from "./siphash";
 /**
  * Beacon frame, 18 bytes, sent as a BLE notification (fits the default 20-byte ATT payload):
  *   [0]     version (1)
- *   [1]     kind: 1 = help, 2 = ok, 3 = test (beacon to node), 16 = ack (node to beacon)
+ *   [1]     kind: 1 = help, 2 = ok, 3 = test (beacon to node), 4 = fall, 16 = ack (node to beacon)
  *   [2..5]  session id, uint32 LE, random per boot
  *   [6..9]  counter, uint32 LE, increments per press
  *   [10..17] SipHash-2-4 tag over (beaconId || 0x00 || bytes 0..9) with the beacon's 16-byte key
@@ -11,8 +11,9 @@ import { siphash24, tagsEqual } from "./siphash";
  */
 export const FRAME_LEN = 18;
 export const FRAME_VERSION = 1;
-export type BeaconKind = "help" | "ok" | "test" | "ack";
-const KINDS: Record<number, BeaconKind> = { 1: "help", 2: "ok", 3: "test", 16: "ack" };
+export const FALL_NOTE = "Possible fall detected by the beacon. No button was pressed.";
+export type BeaconKind = "help" | "ok" | "test" | "fall" | "ack";
+const KINDS: Record<number, BeaconKind> = { 1: "help", 2: "ok", 3: "test", 4: "fall", 16: "ack" };
 
 export interface BeaconFrame {
   beaconId: string;

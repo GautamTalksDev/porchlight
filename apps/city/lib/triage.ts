@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import type { CitySnapshot } from "./city";
+import { isFall } from "./fall";
 import { NEED_LABELS, registry } from "./registry";
 import { TriageOutput, collapseByHousehold, describeGeminiFailure, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
 
@@ -74,6 +75,7 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
       needs: (h?.needs ?? []).map((id) => ({ id, weight: NEED_LABELS[id]?.weight ?? 5 })),
       lang: h?.lang ?? "en",
       note: sanitizeNote(inc.note),
+      fall: isFall(inc.note),
     };
   });
 

@@ -5,6 +5,7 @@ import CityCanvas from "@/components/city/CityCanvas";
 import { Brand } from "@/components/ui/Brand";
 import type { CityMessage, CitySnapshot } from "@/lib/city";
 import type { PorchlightCity } from "@/lib/city/scene";
+import { isFall } from "@/lib/fall";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { useVoiceCall } from "./useVoiceCall";
@@ -34,6 +35,7 @@ interface Arrival {
   key: string;
   household: string;
   label: string;
+  fall: boolean;
 }
 
 export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coordinator: string; authMode: string; nodeHouseIds: string[] }) {
@@ -179,7 +181,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     for (const i of snap.incidents) known.current.add(i.key);
     if (!arrived.length) return;
     const first = arrived[0]!;
-    setArrival({ key: first.key, household: first.household, label: first.label });
+    setArrival({ key: first.key, household: first.household, label: first.label, fall: isFall(first.note) });
     setFresh(new Set(arrived.map((a) => a.key)));
     chime();
     if (voice.state === "idle" || voice.state === "error") {
@@ -342,7 +344,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
           <button type="button" className="arrival" onClick={() => choose(arrival.household)}>
             <span className="arrival-dot" aria-hidden="true" />
             <span>
-              <strong>New call for help</strong>
+              <strong>{arrival.fall ? "Possible fall detected" : "New call for help"}</strong>
               <span>{arrival.label}. Press C to call, D to dispatch.</span>
             </span>
           </button>
@@ -373,6 +375,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                     </span>
                     <span className="call-reason">{r.reason}</span>
                     <span className="tags">
+                      {isFall(snap?.incidents.find((i) => i.key === r.incident)?.note) ? (
+                        <span className="tag tag-fall">Possible fall</span>
+                      ) : null}
                       {r.needs.map((n) => (
                         <span key={n} className={`tag ${/power/.test(n) ? "tag-power" : ""}`}>{n}</span>
                       ))}
@@ -405,8 +410,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
                   <span className="status-word" data-status={household.status}>{STATUS_TEXT[household.status]}</span>
                   {household.lastEventAt ? `, last heard ${ago(household.lastEventAt)}` : null}
                 </p>
-                {household.needs.length ? (
+                {household.needs.length || (incident && isFall(incident.note)) ? (
                   <div className="tags">
+                    {incident && isFall(incident.note) ? <span className="tag tag-fall">Possible fall</span> : null}
                     {household.needs.map((n) => (
                       <span key={n.id} className={`tag ${/power/.test(n.label) ? "tag-power" : ""}`}>{n.label}</span>
                     ))}

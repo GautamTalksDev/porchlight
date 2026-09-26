@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { bytesToHex, encodeFrame, generateIdentity, hexToBytes } from "@porchlight/protocol";
+import { FALL_NOTE, bytesToHex, encodeFrame, generateIdentity, hexToBytes } from "@porchlight/protocol";
 import { NodeAgent } from "../src/agent";
 import { createCityStub } from "../src/city-stub";
 import { loadConfig } from "../src/config";
@@ -134,5 +134,17 @@ describe("three nodes and a city", () => {
     const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "help", 0x1234, 1));
     const res = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble" });
     assert.equal(res.status, 429);
+  });
+
+  it("a fall frame creates a help event whose note is FALL_NOTE", async () => {
+    await new Promise((r) => setTimeout(r, 900));
+    const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), "fall", 0x1234, 5));
+    const res = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -58 });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { kind: string };
+    assert.equal(body.kind, "help");
+    await until(() => nodes[0]!.agent.state().incidents.some((i) => i.key === "pl-b01:00001234:5" && i.note === FALL_NOTE));
+    const inc = nodes[0]!.agent.state().incidents.find((i) => i.key === "pl-b01:00001234:5")!;
+    assert.equal(inc.status, "open");
   });
 });

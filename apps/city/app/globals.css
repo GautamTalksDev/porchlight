@@ -312,6 +312,7 @@ html { scroll-behavior: smooth; }
 .tags { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #262c52; color: #ece6d9; }
 .tag-power { background: rgba(255, 106, 85, 0.16); color: #ff6a55; }
+.tag-fall { background: rgba(255, 106, 85, 0.22); color: #ff6a55; }
 .triage-source { font-size: 0.875rem; color: #b3aec6; }
 .empty { color: #b3aec6; }
 

@@ -1,6 +1,7 @@
 // Porchlight node console. No framework, no inline scripts, DOM built with textContent only.
 
 const TOKEN = document.querySelector('meta[name="pl-token"]').content;
+const FALL_NOTE = "Possible fall detected by the beacon. No button was pressed.";
 const BLE = {
   service: "7a1f0001-5c3e-4f6b-9d2a-6c1e0b8f4a10",
   alert: "7a1f0002-5c3e-4f6b-9d2a-6c1e0b8f4a10",
@@ -201,7 +202,7 @@ function renderAlerts(incidents) {
         { class: "alert", dataset: { status: i.status } },
         el("p", { class: "alert-title" }, i.label),
         el("p", { class: "alert-meta" }, `${acked ? "A neighbour is on the way." : "Waiting for a neighbour."} ${heard}, ${ago(hlcWall(i.openedAt))}.`),
-        i.note ? el("p", {}, i.note) : null,
+        i.note === FALL_NOTE ? el("p", {}, "Possible fall, no button pressed") : i.note ? el("p", {}, i.note) : null,
         acked
           ? null
           : el("div", { class: "row" }, el("button", { class: "btn btn-ack", type: "button", onclick: () => acknowledge(i) }, "I'm on my way")),

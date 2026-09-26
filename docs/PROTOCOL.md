@@ -9,7 +9,7 @@ Every button press becomes one **18 byte frame**. The same format carries acknow
 | Bytes | Field | Meaning |
 | - | - | - |
 | 0 | version | Always `1` |
-| 1 | kind | `1` help, `2` ok (I'm safe), `3` test, `16` ack |
+| 1 | kind | `1` help, `2` ok (I'm safe), `3` test, `4` fall, `16` ack |
 | 2 to 5 | session | Random 32 bit number chosen when the beacon boots, little endian |
 | 6 to 9 | counter | Counts presses within a session, little endian, starts at 1 |
 | 10 to 17 | tag | SipHash 2 4 of the message below, with the beacon's 16 byte key |

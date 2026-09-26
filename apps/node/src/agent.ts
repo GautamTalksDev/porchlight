@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  FALL_NOTE,
   BeaconGuard,
   EventStore,
   HybridClock,
@@ -167,8 +168,9 @@ export class NodeAgent {
     if (!decoded.ok) return fail(decoded.reason, 401);
     const f = decoded.frame;
     if (f.kind === "ack") return fail("beacons cannot send acks", 400);
+    const helpLike = f.kind === "help" || f.kind === "fall";
     const verdict = this.guard.check(f);
-    if (verdict === "duplicate" && f.kind === "help") {
+    if (verdict === "duplicate" && helpLike) {
       // Another node already reported this press. If we heard it directly too, add our signed
       // observation: two independent witnesses make a false alarm much less likely.
       const inc = project(this.store.all()).incidents.find((i) => i.key === f.incident);
@@ -179,6 +181,7 @@ export class NodeAgent {
           incident: f.incident,
           source: { type: "beacon", beacon: report.beaconId, rssi: report.rssi },
           lang: this.langFor(household),
+          note: f.kind === "fall" ? FALL_NOTE : undefined,
         });
         this.store.add(ev);
         state.lastResult = "corroborated";
@@ -191,21 +194,23 @@ export class NodeAgent {
       this.changed();
       return { ok: true, eventId: "", kind: "test", incident: f.incident, household };
     }
+    const eventKind = f.kind === "fall" ? "help" : f.kind;
     const ev = createEvent(this.identity, this.clock, {
-      kind: f.kind,
+      kind: eventKind,
       household,
-      incident: f.kind === "help" ? f.incident : undefined,
+      incident: helpLike ? f.incident : undefined,
       source: { type: "beacon", beacon: report.beaconId, rssi: report.rssi },
       lang: this.langFor(household),
+      note: f.kind === "fall" ? FALL_NOTE : undefined,
     });
     this.store.add(ev);
-    return { ok: true, eventId: ev.id, kind: f.kind, incident: f.incident, household };
+    return { ok: true, eventId: ev.id, kind: eventKind, incident: f.incident, household };
   }
 
   private simSessions = new Map<string, { session: number; counter: number }>();
 
   /** Development helper: builds a genuine authenticated frame as if the Arduino sent it. */
-  simulateBeaconPress(beaconId: string, kind: "help" | "ok" | "test"): BeaconOutcome {
+  simulateBeaconPress(beaconId: string, kind: "help" | "ok" | "test" | "fall"): BeaconOutcome {
     const key = this.config.beaconKeys.get(beaconId);
     if (!key) return { ok: false, reason: "unknown beacon (no key configured)", status: 403 };
     const s = this.simSessions.get(beaconId) ?? { session: (Math.random() * 0xffffffff) >>> 0, counter: 0 };

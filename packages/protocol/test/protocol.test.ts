@@ -152,6 +152,15 @@ describe("beacon frames", () => {
     assert.equal(r.ok, true);
     if (r.ok) assert.equal(r.frame.incident, "pl-b01:deadbeef:7");
   });
+  it("a kind 4 fall frame round-trips and authenticates", () => {
+    const f = encodeFrame("pl-b01", key, "fall", 0x12340001, 3);
+    const r = decodeFrame("pl-b01", key, f);
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.frame.kind, "fall");
+      assert.equal(r.frame.incident, "pl-b01:12340001:3");
+    }
+  });
   it("rejects a frame with a flipped bit", () => {
     const f = encodeFrame("pl-b01", key, "help", 1, 1);
     f[6] = f[6]! ^ 0x01;

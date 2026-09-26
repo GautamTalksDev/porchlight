@@ -52,7 +52,7 @@ const CheckinBody = z.strictObject({
 const AckBody = z.strictObject({ incident: z.string().regex(/^[a-z0-9:-]{3,96}$/) });
 const UplinkBody = z.strictObject({ cut: z.boolean() });
 const ChaosBody = z.strictObject({ drop: z.number().min(0).max(0.95) });
-const DevBeaconBody = z.strictObject({ beaconId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/), kind: z.enum(["help", "ok", "test"]) });
+const DevBeaconBody = z.strictObject({ beaconId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/), kind: z.enum(["help", "ok", "test", "fall"]) });
 
 function isLoopback(req: IncomingMessage): boolean {
   const a = req.socket.remoteAddress ?? "";
