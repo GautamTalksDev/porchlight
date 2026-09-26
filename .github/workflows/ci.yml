@@ -29,7 +29,7 @@ jobs:
         run: npm audit
       - name: Typecheck every workspace
         run: npm run typecheck
-      - name: Unit tests, including the CGI AI firewall
+      - name: Unit tests
         run: npm test
       - name: Firmware crypto matches the node (host build)
         run: npm run test:firmware

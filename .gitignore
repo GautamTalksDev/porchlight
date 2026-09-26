@@ -12,6 +12,6 @@ reports/*.json
 apps/city/.data/
 next-env.d.ts
 
-# CGI challenge data never enters the repository. Keep it outside this folder entirely.
+# Harmless safety: ignore leftover challenge data folders if they ever appear.
 cgi-data/
 *.cgi.csv

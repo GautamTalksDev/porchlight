@@ -1,5 +1,4 @@
-# Cursor must never read CGI's challenge data. Sending it to any AI tool disqualifies the team.
-# Best practice: keep CGI's files OUTSIDE this repository folder. These rules are a second line of defence.
+# Harmless safety: ignore leftover challenge data folders if they ever appear.
 cgi-data/
 **/cgi-data/
 *.cgi.csv

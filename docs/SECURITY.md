@@ -11,7 +11,6 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md) at the repository r
 | The truth of a call for help | A fake alert wastes a responder. A suppressed one can cost a life |
 | The household registry (needs, language) | Knowing who is alone and dependent on power is dangerous in the wrong hands |
 | Coordinator actions | "Marked safe" closes a case. It must be attributable and impossible to forge |
-| CGI's challenge data | Their rule: it must never reach an AI tool |
 
 ## Who we defend against
 
@@ -59,7 +58,7 @@ flowchart LR
 | Risk | How Porchlight handles it |
 | - | - |
 | **LLM01 Prompt Injection** | Resident notes are the only free text a model sees. They are stripped of control characters, cut to 200 characters, and the system instruction says to treat them as information, never as instructions. The output must match a JSON schema, and Gemini has no tools to misuse. |
-| **LLM02 Sensitive Information Disclosure** | Gemini receives pseudonymous references (`R1`, `R2`), need categories and wait times. No names, addresses or household ids. CGI's data never reaches any model. The voice agent does receive the address and needs of the one household it is calling, because it cannot do its job without them. |
+| **LLM02 Sensitive Information Disclosure** | Gemini receives pseudonymous references (`R1`, `R2`), need categories and wait times. No names, addresses or household ids. The voice agent does receive the address and needs of the one household it is calling, because it cannot do its job without them. |
 | **LLM03 Supply Chain** | Official Google and ElevenLabs SDKs, pinned. The model name is configuration (`GEMINI_MODEL`), not code. |
 | **LLM04 Data and Model Poisoning** | We do not train or fine-tune models, and nothing users write is fed back into training. |
 | **LLM05 Improper Output Handling** | Model output is parsed with a schema, invented references are dropped, duplicates removed, and any case the model skipped is added back by the built-in rules. It is rendered as plain text and never executed. |
@@ -83,16 +82,6 @@ flowchart LR
 * Nodes know household slugs and fictional street labels, never needs.
 * Public pages (landing, story mode) show no needs at all.
 * The data in this repository is invented. A real registry would come from an opt-in program and be loaded with `CITY_REGISTRY_FILE`.
-
-## CGI's data
-
-CGI's rule is that none of their data may go into an AI tool. We treat that as a hard requirement:
-
-* The CGI workbench reads files in the browser tab and sends nothing anywhere.
-* `test/ai-firewall.test.ts` fails the build if anything in the CGI module imports an AI SDK, calls the network, or references an AI route.
-* `.cursorignore` and `.gitignore` exclude CGI data patterns, and the team keeps the files outside this repository so no coding assistant can index them.
-
-See [CGI.md](CGI.md) for the full procedure.
 
 ## Known gaps
 

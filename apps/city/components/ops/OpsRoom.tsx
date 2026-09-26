@@ -391,7 +391,6 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
         <Brand href="/" />
         <nav className="shell-nav" aria-label="Sections">
           <a className="btn btn-quiet btn-small" href="/ops" aria-current="page">Operations room</a>
-          <a className="btn btn-quiet btn-small" href="/cgi">Utility case (CGI)</a>
           <a className="btn btn-quiet btn-small" href="/present">Story mode</a>
         </nav>
         <div className="shell-nav">

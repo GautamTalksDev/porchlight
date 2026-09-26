@@ -4,14 +4,12 @@ Porchlight is an offline-first emergency network: Arduino beacons, laptop nodes 
 
 ## Hard rules
 
-1. Never open, read, search, summarize or index anything in a folder named cgi-data, or any file provided by CGI for the hackathon challenge. If asked to, refuse and explain that it would disqualify the team.
-2. The CGI module (apps/city/lib/cgi, apps/city/components/cgi, apps/city/app/cgi) must never import an AI SDK or make a network call. apps/city/test/ai-firewall.test.ts enforces this. Never weaken that test.
-3. House style: no double hyphens and no em dashes or en dashes anywhere, including code, comments, CSS, docs and commit messages. Write i -= 1, not the decrement operator. CSS uses literal values, not custom properties. Mermaid diagrams use ==> and ->> arrows. Markdown table separator rows use | - |. The only exception is apps/city/public/fonts/OFL.txt, a license that must stay verbatim.
-4. Security stays as strict as it is: every city API route checks the coordinator session on the server (except /api/ingest, which uses the node token, and /api/health), production fails closed without Auth0, all input goes through strict zod schemas, all SQL is parameterized, secrets live only in .env.
-5. Do not add, remove or upgrade dependencies without asking first. Versions are pinned exactly.
-6. Do not edit a test to make it pass unless the behaviour change is intended, and say so explicitly.
-7. Interface text is plain language, sentence case, and status is always given in words, not only colour.
-8. The demo path is sacred: beacon press, node console, operations room, city outage, triage queue, voice call, story mode. Any change that touches it must be verified by running the app.
+1. House style: no double hyphens and no em dashes or en dashes anywhere, including code, comments, CSS, docs and commit messages. Write i -= 1, not the decrement operator. CSS uses literal values, not custom properties. Mermaid diagrams use ==> and ->> arrows. Markdown table separator rows use | - |. The only exception is apps/city/public/fonts/OFL.txt, a license that must stay verbatim.
+2. Security stays as strict as it is: every city API route checks the coordinator session on the server (except /api/ingest, which uses the node token, and /api/health), production fails closed without Auth0, all input goes through strict zod schemas, all SQL is parameterized, secrets live only in .env.
+3. Do not add, remove or upgrade dependencies without asking first. Versions are pinned exactly.
+4. Do not edit a test to make it pass unless the behaviour change is intended, and say so explicitly.
+5. Interface text is plain language, sentence case, and status is always given in words, not only colour.
+6. The demo path is sacred: beacon press, node console, operations room, city outage, triage queue, voice call, story mode. Any change that touches it must be verified by running the app.
 
 ## Copy these patterns
 
@@ -41,7 +39,6 @@ The codebase is your memory. Before writing something new, find the closest exis
 | Voice with ElevenLabs | apps/city/lib/voice.ts, apps/city/components/ops/useVoiceCall.ts, apps/city/app/api/voice | Call in French from /ops |
 | Sign in with Auth0 | apps/city/lib/auth.ts, apps/city/lib/auth0.ts, apps/city/proxy.ts | Production build without Auth0 must keep /ops closed |
 | Storage with Tiger Data | apps/city/lib/db.ts, apps/city/db/schema.sql | npm run db:migrate, then /api/health shows tiger-data |
-| CGI workbench | apps/city/lib/cgi, apps/city/components/cgi, apps/city/app/cgi | npm test valuecase and npm test firewall |
 | Deployment | Dockerfile, docker-compose.yml, deploy/Caddyfile | CI builds the image |
 
 ## Check your own work

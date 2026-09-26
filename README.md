@@ -46,7 +46,6 @@ flowchart LR
 | Nobody can fake a call for help | Every event is signed with Ed25519 and every beacon frame carries a SipHash tag. Forged, replayed and flooded frames are rejected. See [PROTOCOL.md](docs/PROTOCOL.md). |
 | The firmware and the node agree byte for byte | A host build of the firmware's crypto is cross-checked against the TypeScript implementation in CI. |
 | The city never forgets | Events are written to Tiger Data before a node is told they arrived, and the city reloads them after a restart. |
-| CGI's data never touches AI | An automated test fails the build if the CGI module imports any AI library or makes any network call. See [CGI.md](docs/CGI.md). |
 
 > These are simulation and test results, not a field trial. We say so on every screen that shows them.
 
@@ -57,7 +56,6 @@ flowchart LR
 | **Node console** (`localhost:7401`) | A neighbour hosting a node | Alerts nearby, who is safe, a button to say "I'm on my way", mesh health, a chaos slider |
 | **Operations room** (`/ops`) | City coordinators, signed in with Auth0 | A 3D city at night, the ranked queue of who needs help first, live voice check-ins, a Tiger Data timeline |
 | **Story mode** (`/present`) | Judges, councillors, anyone | An 11 chapter walkthrough of the derecho night. Arrow keys to move, A to autoplay, F for full screen |
-| **Utility workbench** (`/cgi`) | The CGI challenge | A local, AI-free complaint profiler and a value case a CFO can check line by line |
 | **Landing page** (`/`) | The public | The 3D city on a loop: a storm crosses, a call for help goes out, the lights come back |
 
 ## See it
@@ -68,8 +66,8 @@ flowchart LR
 | **Landing page.** The storm sweeps west to east, the way the 2022 derecho did. | **Operations room, city link down.** Every window is dark except the three node homes. The red beam is a call for help. |
 | ![Story mode, the derecho chapter](docs/images/story-derecho.png) | ![Story mode, who first](docs/images/story-triage.png) |
 | **Story mode.** The whole city dark, with the source on screen. | **Who first.** Power-dependent needs rise to the top. |
-| ![A node console](docs/images/node-console.png) | ![The CGI workbench](docs/images/cgi-workbench.png) |
-| **Node console.** What a neighbour sees, with no internet. | **CGI workbench.** Local, AI-free, auditable. |
+| ![A node console](docs/images/node-console.png) | |
+| **Node console.** What a neighbour sees, with no internet. | |
 
 *Screenshots are from a headless browser with software rendering; a real GPU looks sharper.*
 
@@ -118,7 +116,7 @@ flowchart TB
     end
     subgraph run["apps"]
       NODE["node<br/>neighbourhood agent and console"]
-      CITY["city<br/>operations room, 3D city, CGI workbench, API"]
+      CITY["city<br/>operations room, 3D city, API"]
       SIM["sim<br/>chaos harness"]
     end
     FW["firmware<br/>Arduino beacon"]
@@ -132,12 +130,12 @@ flowchart TB
 porchlight/
 ├── packages/protocol/     Shared protocol, used by every other part
 ├── apps/node/             Node agent (runs on a neighbour's laptop) and its console
-├── apps/city/             City app: operations room, story mode, CGI workbench, API
+├── apps/city/             City app: operations room, story mode, API
 ├── apps/sim/              Chaos simulation used in CI
 ├── firmware/              Arduino Nano 33 BLE beacon and a host test of its crypto
 ├── config/                Fictional demo households and the city registry
 ├── deploy/                Caddy configuration for HTTPS
-├── docs/                  Architecture, protocol, security, hardware, CGI, demo, deploy
+├── docs/                  Architecture, protocol, security, hardware, demo, deploy
 └── docker-compose.yml     One command production stack for a single server
 ```
 
@@ -165,7 +163,6 @@ Setup for each integration is in [DEPLOY.md](docs/DEPLOY.md).
 | [PROTOCOL.md](docs/PROTOCOL.md) | Know every byte on the air and every field in an event |
 | [SECURITY.md](docs/SECURITY.md) | See the threat model and how we map to the OWASP Top 10:2025 and the OWASP LLM Top 10 |
 | [HARDWARE.md](docs/HARDWARE.md) | Flash the beacon and troubleshoot it |
-| [CGI.md](docs/CGI.md) | Work on the CGI challenge without ever exposing their data to AI |
 | [DEMO.md](docs/DEMO.md) | Run the live demo, with a backup for every step |
 | [DEPLOY.md](docs/DEPLOY.md) | Put the city online with Vultr, a domain, Auth0, Tiger Data, Gemini and ElevenLabs |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Send a change |

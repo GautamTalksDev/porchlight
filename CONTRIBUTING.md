@@ -26,7 +26,7 @@ flowchart LR
 * **Every behaviour change comes with a test.** Protocol changes need a test in `packages/protocol/test`.
 * **Anything that could lose an alert** needs a chaos run: `npm run sim nodes=50 loss=0.4 cycles=100 assert`.
 * **Keep the protocol compatible.** A change to the frame or event format must bump the version and keep verifying old events.
-* **Never commit secrets** (`.env`, `config.h`, node data folders) or CGI's challenge data.
+* **Never commit secrets** (`.env`, `config.h`, node data folders).
 
 ## Writing style
 
