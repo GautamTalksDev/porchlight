@@ -52,6 +52,15 @@ flowchart LR
 | The projector struggles with 3D | "Let me show you on this screen" | Story mode on the laptop screen. Or play the recorded video |
 | Everything fails | "Here is the run we recorded this morning" | Play the video |
 
+## Before every rehearsal
+
+* [ ] Stop the nodes (`Ctrl+C` in the demo terminal).
+* [ ] `npm run demo:reset` (clears each demo node's event log and delivery state, keeps identity keys).
+* [ ] Start the nodes again with `npm run demo:local` (and the city app if you use a real city).
+* [ ] In the operations room, press **Shift+R** and confirm **Reset** (requires `DEMO_RESET_ENABLED=true`).
+* [ ] Press **P** and confirm every preflight check is green.
+* [ ] Connect the beacon (Bluetooth or USB) on Node A.
+
 ## Checklist, the hour before
 
 * [ ] All laptops charged and plugged in. Display sleep off. Notifications off.

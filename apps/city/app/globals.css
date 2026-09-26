@@ -273,11 +273,37 @@ html { scroll-behavior: smooth; }
   display: inline-flex; align-items: baseline; gap: 0.4rem; padding: 0.45rem 0.9rem; border-radius: 999px; font-size: 0.85rem; color: #b3aec6;
   background: rgba(10, 12, 30, 0.72); backdrop-filter: blur(12px); border: 1px solid rgba(236, 230, 217, 0.12);
 }
+.hud-chip.hud-preflight { pointer-events: auto; cursor: pointer; align-items: center; }
 .hud-chip strong { font-size: 1.3rem; font-weight: 800; color: #ece6d9; font-variant-numeric: tabular-nums; }
 .hud-chip[data-kind="help"] strong { color: #ff6a55; }
 .hud-chip[data-kind="acknowledged"] strong { color: #9ec5ff; }
 .hud-chip[data-kind="ok"] strong { color: #f2b35e; }
 .hud-chip[data-kind="silent"] strong { color: #b8c4e0; }
+
+.preflight-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: #343b63; flex-shrink: 0;
+}
+.preflight-dot[data-ok="true"] { background: #9fe2b5; box-shadow: 0 0 8px rgba(159, 226, 181, 0.55); }
+.preflight-dot[data-ok="false"] { background: #ff6a55; box-shadow: 0 0 8px rgba(255, 106, 85, 0.45); }
+.preflight-dot[data-ok="unknown"] { background: #b3aec6; }
+
+.preflight-popover {
+  position: absolute; z-index: 12; top: 64px; right: 402px; width: min(340px, calc(100% - 2rem));
+  display: grid; gap: 0.75rem; padding: 1rem 1.1rem; border-radius: 14px;
+  background: rgba(10, 12, 30, 0.92); border: 1px solid rgba(236, 230, 217, 0.16); backdrop-filter: blur(14px);
+}
+.preflight-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.preflight-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem; }
+.preflight-list li { display: grid; grid-template-columns: auto 1fr; gap: 0.6rem; align-items: start; font-size: 0.875rem; }
+.preflight-list strong { display: block; color: #ece6d9; }
+.preflight-list .section-sub { display: block; margin-top: 0.1rem; }
+
+.demo-reset-dialog {
+  position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: grid; gap: 0.9rem; width: min(420px, calc(100% - 2rem)); padding: 1.25rem 1.4rem; border-radius: 16px;
+  background: rgba(10, 12, 30, 0.96); border: 1px solid rgba(255, 106, 85, 0.35); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.demo-reset-dialog .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 
 .arrival {
   position: absolute; z-index: 6; top: 70px; left: 50%; transform: translateX(-50%);

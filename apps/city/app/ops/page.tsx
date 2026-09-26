@@ -11,5 +11,13 @@ export default async function OpsPage() {
   const coordinator = await currentCoordinator();
   if (!coordinator) return <SignInGate reason="signed-out" />;
   const { nodeHouseIds } = publicHouseholds();
-  return <OpsRoom coordinator={coordinator.name} authMode={mode} nodeHouseIds={nodeHouseIds} />;
+  const demoResetEnabled = process.env.DEMO_RESET_ENABLED === "true";
+  return (
+    <OpsRoom
+      coordinator={coordinator.name}
+      authMode={mode}
+      nodeHouseIds={nodeHouseIds}
+      demoResetEnabled={demoResetEnabled}
+    />
+  );
 }

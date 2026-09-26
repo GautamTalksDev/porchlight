@@ -113,3 +113,31 @@ export function foldTimeline(rows: { bucket: string; kind: string; n: number }[]
   }
   return [...map.values()].sort((a, b) => a.bucket.localeCompare(b.bucket));
 }
+
+/** Empty demo event history. Does not touch settings or the city signing identity. */
+export async function clearDemoTables(): Promise<void> {
+  await pool().query("TRUNCATE events, deliveries");
+  try {
+    await pool().query("CALL refresh_continuous_aggregate('events_per_minute', NULL, NULL)");
+  } catch {
+    /* plain PostgreSQL or Timescale without the continuous aggregate */
+  }
+  try {
+    await pool().query(`
+      DO $body$
+      DECLARE
+        mat text;
+      BEGIN
+        SELECT format('%I.%I', materialization_hypertable_schema, materialization_hypertable_name)
+          INTO mat
+          FROM timescaledb_information.continuous_aggregates
+         WHERE view_name = 'events_per_minute';
+        IF mat IS NOT NULL THEN
+          EXECUTE format('TRUNCATE %s', mat);
+        END IF;
+      END
+      $body$`);
+  } catch {
+    /* materialization table not present */
+  }
+}

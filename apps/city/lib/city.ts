@@ -11,11 +11,12 @@ import {
 } from "@porchlight/protocol";
 import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
 import { buildNeighbourThread, circleWindows } from "./circles";
-import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, type TimelineBucket } from "./db";
+import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, clearDemoTables, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
 import { classifyIngestItem } from "./ingest-verify";
 import { NEED_LABELS, registry } from "./registry";
 import { computeSilent } from "./silence";
+import { shouldSkipAnalytics } from "./analytics-backoff";
 
 export interface NodeSeen {
   id: string;
@@ -28,7 +29,8 @@ export type CityMessage =
   | { type: "delivery"; node: { id: string; name: string }; events: Pick<SignedEvent, "id" | "kind" | "household" | "origin" | "incident">[] }
   | { type: "outage"; down: boolean }
   | { type: "emergency"; since: number | null }
-  | { type: "action"; kind: string; household: string };
+  | { type: "action"; kind: string; household: string }
+  | { type: "reset" };
 
 interface CityState {
   ready: Promise<void>;
@@ -39,6 +41,8 @@ interface CityState {
   outage: boolean;
   emergencySince: number | null;
   listeners: Set<(m: CityMessage) => void>;
+  /** Wall clock when analytics last failed; used to skip retries for 30 seconds. */
+  analyticsFailedAt: number | null;
 }
 
 const g = globalThis as unknown as { __plCity?: CityState };
@@ -55,6 +59,7 @@ export function city(): CityState {
     outage: false,
     emergencySince: null,
     listeners: new Set(),
+    analyticsFailedAt: null,
   };
   state.ready = (async () => {
     if (!dbEnabled()) return;
@@ -175,6 +180,28 @@ export async function setEmergency(active: boolean): Promise<number | null> {
   return c.emergencySince;
 }
 
+/**
+ * Wipe demo state for a clean rehearsal. Clears events in memory and (when enabled) in Tiger Data.
+ * Does not touch the city signing identity.
+ */
+export async function resetDemo(): Promise<void> {
+  const c = city();
+  await c.ready;
+  c.store = new EventStore();
+  c.nodes.clear();
+  c.receivedAt.clear();
+  c.deliveredBy.clear();
+  c.outage = false;
+  c.emergencySince = null;
+  c.analyticsFailedAt = null;
+  if (dbEnabled()) {
+    await clearDemoTables();
+    await setSetting("outage", false);
+    await setSetting("emergencySince", null);
+  }
+  emit({ type: "reset" });
+}
+
 /** A coordinator or the voice agent acts on a household. Signed with the city's own key. */
 export async function cityAction(kind: "ok" | "ack", household: string, opts: { incident?: string; note?: string } = {}): Promise<SignedEvent | null> {
   const c = city();
@@ -262,12 +289,18 @@ export async function snapshot() {
   let tl: { source: string; buckets: TimelineBucket[] };
   let hold = { p50: 0, p95: 0, max: 0, n: 0 };
   if (dbEnabled()) {
-    try {
-      tl = await timeline();
-      hold = await holdStats();
-    } catch (err) {
-      console.error("[city] analytics query failed", (err as Error).message);
-      tl = { source: "unavailable", buckets: [] };
+    if (shouldSkipAnalytics(c.analyticsFailedAt, now)) {
+      tl = { source: "paused", buckets: [] };
+    } else {
+      try {
+        tl = await timeline();
+        hold = await holdStats();
+        c.analyticsFailedAt = null;
+      } catch (err) {
+        console.error("[city] analytics query failed", (err as Error).message);
+        c.analyticsFailedAt = now;
+        tl = { source: "paused", buckets: [] };
+      }
     }
   } else {
     const cutoff = now - 60 * 60_000;

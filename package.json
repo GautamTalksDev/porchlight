@@ -20,6 +20,7 @@
     "sim:ci": "tsx apps/sim/src/run.ts nodes=30 loss=0.3 cycles=50 assert && node -e \"require('fs').copyFileSync('reports/sim-latest.json','apps/city/public/sim-report.json')\"",
     "node": "tsx apps/node/src/main.ts",
     "demo:local": "tsx apps/node/src/demo-local.ts",
+    "demo:reset": "tsx apps/node/scripts/reset-demo.ts",
     "keygen": "tsx apps/node/src/keygen.ts",
     "city:dev": "npm run dev -w @porchlight/city",
     "city:build": "npm run build -w @porchlight/city",

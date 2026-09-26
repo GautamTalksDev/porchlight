@@ -1,6 +1,7 @@
 // Porchlight node console. No framework, no inline scripts, DOM built with textContent only.
 
 let TOKEN = document.querySelector('meta[name="pl-token"]').content;
+let sessionReady = false;
 const FALL_NOTE = "Possible fall detected by the beacon. No button was pressed.";
 const BLE = {
   service: "7a1f0001-5c3e-4f6b-9d2a-6c1e0b8f4a10",
@@ -67,6 +68,11 @@ function el(tag, attrs = {}, ...children) {
 }
 
 async function api(path, body, retried = false) {
+  if (!sessionReady) {
+    const err = new Error("Still loading the console session. Try again in a moment.");
+    err.status = 0;
+    throw err;
+  }
   const res = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json", "x-porchlight-token": TOKEN },
@@ -80,6 +86,8 @@ async function api(path, body, retried = false) {
       const session = await s.json().catch(() => ({}));
       if (s.ok && session.token) {
         TOKEN = session.token;
+        sessionReady = true;
+        setActionsEnabled(true);
         return api(path, body, true);
       }
     } catch { /* fall through to error below */ }
@@ -91,6 +99,14 @@ async function api(path, body, retried = false) {
     throw err;
   }
   return data;
+}
+
+function setActionsEnabled(on) {
+  sessionReady = on;
+  for (const b of document.querySelectorAll("button")) {
+    if (b.dataset.keepEnabled === "true") continue;
+    b.disabled = !on;
+  }
 }
 
 let toastTimer;
@@ -302,7 +318,12 @@ function renderAlerts(incidents) {
               "div",
               { class: "row reply-row" },
               ...REPLY_BUTTONS.map((b) =>
-                el("button", { class: b.className, type: "button", onclick: () => sendReply(i, b.code) }, b.label),
+                el("button", {
+                  class: b.className,
+                  type: "button",
+                  disabled: !sessionReady,
+                  onclick: () => sendReply(i, b.code),
+                }, b.label),
               ),
             ),
         replyThread(i.replies),
@@ -566,6 +587,18 @@ async function readSerial(port) {
 }
 
 // Live state
+
+setActionsEnabled(false);
+fetch("/api/session", { cache: "no-store" })
+  .then(async (r) => {
+    const session = await r.json().catch(() => ({}));
+    if (!r.ok || !session.token) throw new Error(session.reason || "Could not load the console session");
+    TOKEN = session.token;
+    setActionsEnabled(true);
+  })
+  .catch((err) => {
+    toast(err.message || "Could not load the console session", "error");
+  });
 
 function connectStream() {
   const es = new EventSource("/api/stream");

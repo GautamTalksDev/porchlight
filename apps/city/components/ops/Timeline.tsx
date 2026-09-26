@@ -21,7 +21,16 @@ export function Timeline({ buckets, source }: { buckets: TimelineBucket[]; sourc
     postgres: "From PostgreSQL",
     memory: "Computed in memory (no database connected)",
     unavailable: "Database unavailable",
+    paused: "Timeline paused: the database is not reachable",
   };
+  if (source === "paused") {
+    return (
+      <div className="chart">
+        <p className="section-title">Last hour</p>
+        <p className="section-sub">Timeline paused: the database is not reachable</p>
+      </div>
+    );
+  }
   if (total === 0) {
     return (
       <div className="chart">

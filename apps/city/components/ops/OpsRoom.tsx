@@ -11,6 +11,7 @@ import { Timeline } from "./Timeline";
 import { useCopilot } from "./useCopilot";
 import { useVoiceCall } from "./useVoiceCall";
 import type { CopilotLive } from "./useCopilot";
+import { summarizePreflight, type PreflightCheck } from "@/lib/preflight";
 
 const STATUS_TEXT: Record<string, string> = { unknown: "Not heard from", ok: "Safe", help: "Needs help", acknowledged: "Help on the way" };
 const ACTION_TEXT: Record<string, string> = { dispatch_neighbour: "Suggested: dispatch now", voice_check_in: "Suggested: call first", monitor: "Suggested: keep watching" };
@@ -45,7 +46,17 @@ interface Arrival {
   fall: boolean;
 }
 
-export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coordinator: string; authMode: string; nodeHouseIds: string[] }) {
+export default function OpsRoom({
+  coordinator,
+  authMode,
+  nodeHouseIds,
+  demoResetEnabled = false,
+}: {
+  coordinator: string;
+  authMode: string;
+  nodeHouseIds: string[];
+  demoResetEnabled?: boolean;
+}) {
   const [snap, setSnap] = useState<CitySnapshot | null>(null);
   const [triage, setTriage] = useState<TriageResult | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -55,6 +66,11 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
   const [arrival, setArrival] = useState<Arrival | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [sound, setSound] = useState(true);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [preflightOpen, setPreflightOpen] = useState(false);
+  const [preflightChecks, setPreflightChecks] = useState<PreflightCheck[] | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
   const [, setTick] = useState(0);
   const cityRef = useRef<PorchlightCity | null>(null);
   const snapRef = useRef<CitySnapshot | null>(null);
@@ -322,6 +338,34 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     }
   };
 
+  const runDemoReset = async () => {
+    setResetBusy(true);
+    try {
+      await post("/api/demo/reset", {});
+      setResetConfirm(false);
+      setNotice("Demo reset. Every call, reply and notice is cleared.");
+      void refreshTriage();
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  const loadPreflight = async () => {
+    setPreflightLoading(true);
+    try {
+      const r = await fetch("/api/preflight", { cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.reason ?? `Preflight failed (${r.status})`);
+      setPreflightChecks(data.checks ?? []);
+    } catch (err) {
+      setPreflightChecks([{ name: "preflight", ok: false, detail: (err as Error).message }]);
+    } finally {
+      setPreflightLoading(false);
+    }
+  };
+
   // Keyboard shortcuts for a coordinator working fast: J and K move, C calls, V talks to Porchlight, D dispatches, S marks safe.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -331,6 +375,20 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
       const items = triage?.items ?? [];
       const idx = items.findIndex((r) => r.household === selectedId);
       const key = e.key.toLowerCase();
+      if (demoResetEnabled && e.shiftKey && key === "r") {
+        setResetConfirm(true);
+        e.preventDefault();
+        return;
+      }
+      if (key === "p" && !e.shiftKey) {
+        setPreflightOpen((open) => {
+          const next = !open;
+          if (next) void loadPreflight();
+          return next;
+        });
+        e.preventDefault();
+        return;
+      }
       if (key === "j" && items.length) choose(items[Math.min(items.length - 1, idx + 1)]!.household);
       else if (key === "k" && items.length) choose(items[Math.max(0, idx - 1)]!.household);
       else if (key === "c" && household && !copilotBusy && !copilotOpen) void startResidentCall(household.id, incident?.key ?? null);
@@ -338,7 +396,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
       else if (key === "d" && incident?.status === "open") void act("ack");
       else if (key === "s" && household) void act("ok");
       else if (key === "escape") {
-        if (copilotOpen) void copilot.end();
+        if (resetConfirm) setResetConfirm(false);
+        else if (preflightOpen) setPreflightOpen(false);
+        else if (copilotOpen) void copilot.end();
         else {
           setSelected("");
           cityRef.current?.focus("ops");
@@ -362,6 +422,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     choose,
     startCopilot,
     startResidentCall,
+    demoResetEnabled,
+    resetConfirm,
+    preflightOpen,
   ]);
 
   useEffect(() => {
@@ -396,8 +459,11 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     nodesTotal,
   };
 
+  const preflightSummary = summarizePreflight(preflightChecks ?? []);
+
   useEffect(() => {
     void copilot.checkAvailable();
+    void loadPreflight();
     // Probe once on mount so the header button can disable with a tooltip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -478,7 +544,75 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
           <span className="hud-chip" data-kind="unknown"><strong>{counts.unknown}</strong>not heard from</span>
           <span className="hud-chip" data-kind="silent"><strong>{silentCount}</strong>silent</span>
           <span className="hud-chip" data-kind="nodes"><strong>{nodesFresh}</strong>of {nodesTotal} nodes reporting</span>
+          <button
+            type="button"
+            className="hud-chip hud-preflight"
+            data-ok={String(preflightChecks ? preflightSummary.ok : "")}
+            aria-pressed={preflightOpen}
+            title="Preflight (P)"
+            onClick={() => {
+              setPreflightOpen((o) => {
+                const next = !o;
+                if (next) void loadPreflight();
+                return next;
+              });
+            }}
+          >
+            <span className="preflight-dot" data-ok={preflightChecks ? String(preflightSummary.ok) : "unknown"} aria-hidden="true" />
+            Preflight
+          </button>
         </div>
+
+        {preflightOpen ? (
+          <div className="preflight-popover" role="dialog" aria-label="Preflight checks">
+            <div className="preflight-head">
+              <h2 className="section-title">Preflight</h2>
+              <button className="btn btn-quiet btn-small" type="button" onClick={() => setPreflightOpen(false)}>
+                Close
+              </button>
+            </div>
+            {preflightLoading && !preflightChecks ? (
+              <p className="section-sub">Checking…</p>
+            ) : (
+              <ul className="preflight-list">
+                {(preflightChecks ?? []).map((c) => (
+                  <li key={c.name}>
+                    <span className="preflight-dot" data-ok={String(c.ok)} aria-hidden="true" />
+                    <span>
+                      <strong>{c.name}</strong>
+                      <span className="section-sub">{c.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="section-sub">
+              {preflightChecks
+                ? preflightSummary.ok
+                  ? "All checks passed."
+                  : `${preflightSummary.passed} of ${preflightSummary.total} checks passed.`
+                : null}
+            </p>
+            <button className="btn btn-quiet btn-small" type="button" onClick={() => void loadPreflight()} disabled={preflightLoading}>
+              Check again
+            </button>
+          </div>
+        ) : null}
+
+        {resetConfirm ? (
+          <div className="demo-reset-dialog" role="alertdialog" aria-labelledby="demo-reset-h" aria-modal="true">
+            <h2 id="demo-reset-h" className="section-title">Reset the demo?</h2>
+            <p>This clears every call, reply and notice.</p>
+            <div className="row">
+              <button className="btn btn-porch" type="button" onClick={() => void runDemoReset()} disabled={resetBusy}>
+                {resetBusy ? "Resetting…" : "Reset"}
+              </button>
+              <button className="btn btn-quiet" type="button" onClick={() => setResetConfirm(false)} disabled={resetBusy}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {arrival ? (
           <button type="button" className="arrival" onClick={() => choose(arrival.household)}>
