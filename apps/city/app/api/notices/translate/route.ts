@@ -1,6 +1,11 @@
 import { GoogleGenAI } from "@google/genai";
 import { denyUnlessCoordinator } from "@/lib/auth";
 import {
+  availableGeminiModels,
+  isGeminiQuotaError,
+  markGeminiQuotaExhausted,
+} from "@/lib/gemini";
+import {
   buildNoticeTranslatePrompt,
   describeNoticeTranslateFailure,
   formatNoticeModelFailureLog,
@@ -35,7 +40,12 @@ export async function POST(req: Request) {
     return fail(503, describeNoticeTranslateFailure("api key"));
   }
 
-  const models = [...new Set([process.env.GEMINI_MODEL || "gemini-3.6-flash", process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash"])];
+  const now = Date.now();
+  const models = availableGeminiModels(now);
+  if (!models.length) {
+    return fail(503, describeNoticeTranslateFailure("429 RESOURCE_EXHAUSTED"));
+  }
+
   const ai = new GoogleGenAI({ apiKey });
   const prompt = buildNoticeTranslatePrompt(parsed.en);
   let lastError = "Gemini is unavailable";
@@ -62,7 +72,11 @@ export async function POST(req: Request) {
         lastError = parseErr instanceof Error ? parseErr.message : "empty translation";
       }
     } catch (err) {
-      console.error(formatNoticeModelFailureLog(model, err, apiKey));
+      if (isGeminiQuotaError(err)) {
+        markGeminiQuotaExhausted(model);
+      } else {
+        console.error(formatNoticeModelFailureLog(model, err, apiKey));
+      }
       lastError = err instanceof Error ? err.message : String(err);
     }
   }

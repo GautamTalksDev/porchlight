@@ -4,6 +4,13 @@ import { GoogleGenAI } from "@google/genai";
 import type { EscalationTier } from "@porchlight/protocol";
 import type { CitySnapshot } from "./city";
 import { isFall } from "./fall";
+import {
+  availableGeminiModels,
+  isGeminiQuotaError,
+  markGeminiQuotaExhausted,
+  shouldReuseTriageCache,
+  TRIAGE_GEMINI_MIN_INTERVAL_MS,
+} from "./gemini";
 import { NEED_LABELS, registry } from "./registry";
 import { TriageOutput, collapseByHousehold, describeGeminiFailure, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
 
@@ -65,7 +72,9 @@ export interface TriageResult {
   })[];
 }
 
-const g = globalThis as unknown as { __plTriageCache?: { key: string; result: TriageResult } };
+const g = globalThis as unknown as {
+  __plTriageCache?: { key: string; result: TriageResult; lastCallAt: number };
+};
 
 /**
  * Ranks open calls. Gemini sees pseudonymous references only: no names, addresses or household ids.
@@ -130,12 +139,33 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
       ),
     )
     .digest("hex");
-  if (g.__plTriageCache?.key === key && Date.now() - g.__plTriageCache.result.generatedAt < 60_000) return g.__plTriageCache.result;
+  const now = Date.now();
+  const cached = g.__plTriageCache;
+  if (
+    cached &&
+    shouldReuseTriageCache({
+      key,
+      cachedKey: cached.key,
+      lastCallAt: cached.lastCallAt,
+      now,
+      minIntervalMs: TRIAGE_GEMINI_MIN_INTERVAL_MS,
+    })
+  ) {
+    return cached.result;
+  }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return decorate(ruleRanking(cases), "rules", { note: "Gemini is not configured, so calls are ordered by the built-in rules." });
 
-  const models = [...new Set([process.env.GEMINI_MODEL || "gemini-3.6-flash", process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash"])];
+  const models = availableGeminiModels(now);
+  if (!models.length) {
+    const result = decorate(ruleRanking(cases), "rules", {
+      note: "Every Gemini model is cooling down after quota limits, so calls are ordered by the built-in rules.",
+    });
+    g.__plTriageCache = { key, result, lastCallAt: now };
+    return result;
+  }
+
   const ai = new GoogleGenAI({ apiKey });
   const payload = cases.map(({ needs, ...c }) => ({ ...c, needs: needs.map((n) => n.id) }));
   let lastError: Error = new Error("Gemini is unavailable");
@@ -158,12 +188,15 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
       const parsed = TriageOutput.safeParse(JSON.parse(response.text ?? "{}"));
       if (!parsed.success) throw new Error("Gemini returned an unexpected shape");
       const result = decorate(reconcile(cases, parsed.data.ranking), "gemini", { model });
-      g.__plTriageCache = { key, result };
+      g.__plTriageCache = { key, result, lastCallAt: Date.now() };
       return result;
     } catch (err) {
       lastError = err as Error;
+      if (isGeminiQuotaError(err)) markGeminiQuotaExhausted(model);
     }
   }
   console.error("[triage] falling back to rules:", lastError.message);
-  return decorate(ruleRanking(cases), "rules", { note: describeGeminiFailure(lastError.message) });
+  const result = decorate(ruleRanking(cases), "rules", { note: describeGeminiFailure(lastError.message) });
+  g.__plTriageCache = { key, result, lastCallAt: Date.now() };
+  return result;
 }

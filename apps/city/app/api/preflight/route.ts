@@ -2,6 +2,7 @@ import { authMode, denyUnlessCoordinator } from "@/lib/auth";
 import { auth0Configured } from "@/lib/auth0";
 import { city } from "@/lib/city";
 import { dbEnabled, pool } from "@/lib/db";
+import { geminiQuotaPreflightDetail, resolveGeminiModels } from "@/lib/gemini";
 import type { PreflightCheck } from "@/lib/preflight";
 import { summarizePreflight } from "@/lib/preflight";
 
@@ -37,11 +38,18 @@ export async function GET() {
   checks.push(await checkDatabase());
 
   const geminiKey = Boolean(process.env.GEMINI_API_KEY);
-  const models = [...new Set([process.env.GEMINI_MODEL || "gemini-3.6-flash", process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash"])];
+  const models = resolveGeminiModels();
   checks.push({
     name: "Gemini",
     ok: geminiKey,
     detail: geminiKey ? `key present; models ${models.join(", ")}` : "GEMINI_API_KEY is not set",
+  });
+
+  const quota = geminiQuotaPreflightDetail(now);
+  checks.push({
+    name: "Gemini quota",
+    ok: quota.ok,
+    detail: quota.detail,
   });
 
   const elKey = Boolean(process.env.ELEVENLABS_API_KEY);
