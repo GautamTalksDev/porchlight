@@ -237,15 +237,31 @@ function collapseAlerts(incidents) {
   }));
 }
 
+function waitSeconds(i) {
+  const opened = i.openedAtMs ?? hlcWall(i.openedAt);
+  return Math.max(0, Math.round((Date.now() - opened) / 1000));
+}
+
+/** Porch Circles line on a call card. Null when the call is acknowledged (no tier). */
 function circleBanner(i) {
-  if (i.tier === "buddies" && i.isBuddy) {
-    return el("p", { class: "circle-banner circle-buddy" }, `You're a buddy for ${i.label}. They need you.`);
+  if (!i.tier) return null;
+  if (i.tier === "buddies") {
+    if (i.isBuddy) {
+      return el("p", { class: "circle-banner circle-buddy" }, `You're a buddy for ${i.label}. They need you.`);
+    }
+    return el("p", { class: "circle-quiet" }, "Buddies alerted");
   }
   if (i.tier === "street") {
-    const n = state?.circles?.buddyWindowSec ?? 300;
-    return el("p", { class: "circle-banner circle-street" }, `No buddy has answered in ${n} s. Can anyone go?`);
+    return el("p", { class: "circle-banner circle-street" }, `No buddy has answered in ${waitSeconds(i)} s. Can anyone go?`);
   }
-  return el("p", { class: "circle-quiet" }, "Buddies alerted");
+  if (i.tier === "city") {
+    return el(
+      "p",
+      { class: "circle-banner circle-city" },
+      `No neighbour has answered in ${waitSeconds(i)} s. The city has been alerted.`,
+    );
+  }
+  return null;
 }
 
 function replyThread(replies) {
