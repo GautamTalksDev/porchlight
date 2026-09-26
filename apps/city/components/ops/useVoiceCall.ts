@@ -70,9 +70,20 @@ export function useVoiceCall(onToolUsed: () => void) {
               },
               request_responder: async (p: { reason?: string }) => {
                 const r = await post("/api/actions", { kind: "ack", household, incident: incident ?? undefined, note: p?.reason?.slice(0, 200) });
-                add({ who: "tool", text: r.ok ? `Agent requested a responder: ${p?.reason ?? "no reason given"}` : "Agent requested a responder, the city refused" });
+                if (r.ok) {
+                  const data = await r.json();
+                  if (data.already) {
+                    add({ who: "tool", text: "Agent asked for a responder: help was already on the way" });
+                    onToolUsed();
+                    return "Help is already on the way to this home.";
+                  }
+                  add({ who: "tool", text: `Agent requested a responder: ${p?.reason ?? "no reason given"}` });
+                  onToolUsed();
+                  return "A responder has been requested.";
+                }
+                add({ who: "tool", text: "Agent requested a responder, but the city could not record it" });
                 onToolUsed();
-                return r.ok ? "A responder has been requested." : "No open call to attach a responder to.";
+                return "Something went wrong. Tell the resident a coordinator will follow up right away.";
               },
             },
             onMessage: (m) => add({ who: String((m as { role?: string }).role ?? m.source) === "user" ? "user" : "agent", text: m.message }),

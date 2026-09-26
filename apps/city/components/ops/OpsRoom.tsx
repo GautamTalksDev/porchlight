@@ -42,6 +42,7 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
   const [arrival, setArrival] = useState<Arrival | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [sound, setSound] = useState(true);
@@ -69,7 +70,14 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
       es.onerror = () => {
         setConnected(false);
         es?.close();
-        retry = setTimeout(connect, 2000);
+        fetch("/api/state", { cache: "no-store" })
+          .then((r) => {
+            if (r.status === 401) setSessionEnded(true);
+            else retry = setTimeout(connect, 2000);
+          })
+          .catch(() => {
+            retry = setTimeout(connect, 2000);
+          });
       };
     };
     connect();
@@ -210,8 +218,9 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
     async (kind: "ok" | "ack") => {
       if (!household) return;
       try {
-        await post("/api/actions", { kind, household: household.id, incident: incident?.key });
-        setNotice(kind === "ok" ? `${household.label} marked safe` : `Someone is on the way to ${household.label}`);
+        const result = await post("/api/actions", { kind, household: household.id, incident: incident?.key });
+        if (kind === "ack" && result.already) setNotice(`Help is already on the way to ${household.label}`);
+        else setNotice(kind === "ok" ? `${household.label} marked safe` : `Someone is on the way to ${household.label}`);
       } catch (err) {
         setNotice((err as Error).message);
       }
@@ -295,7 +304,13 @@ export default function OpsRoom({ coordinator, authMode, nodeHouseIds }: { coord
         </div>
       </header>
       {authMode === "local-open" ? <p className="banner">Sign-in is off because this is local development. In production this room requires Auth0.</p> : null}
-      {!connected ? <p className="banner banner-warn">Reconnecting to the city server…</p> : null}
+      {sessionEnded ? (
+        <p className="banner banner-warn">
+          Your sign-in ended. <a href="/auth/login?returnTo=/ops">Sign in again</a>
+        </p>
+      ) : !connected ? (
+        <p className="banner banner-warn">Reconnecting to the city server…</p>
+      ) : null}
 
       <main className="ops-stage">
         <section className="ops-city" aria-label="City view">

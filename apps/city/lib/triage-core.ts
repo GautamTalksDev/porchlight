@@ -101,3 +101,10 @@ export function collapseByHousehold<T extends OpenIncidentLike>(list: T[]): T[] 
   }
   return [...best.values()].map((i) => ({ ...i, witnesses: [...(heard.get(i.household) ?? [])] }));
 }
+
+export function describeGeminiFailure(message: string): string {
+  if (/\b503\b|UNAVAILABLE|high demand|overloaded/i.test(message)) return "Gemini is busy right now, so calls are ordered by the built-in rules.";
+  if (/took longer|timed? ?out|deadline/i.test(message)) return "Gemini did not answer in time, so calls are ordered by the built-in rules.";
+  if (/\b40[13]\b|api key|permission/i.test(message)) return "Gemini rejected the API key, so calls are ordered by the built-in rules.";
+  return "Gemini is unavailable, so calls are ordered by the built-in rules.";
+}

@@ -104,12 +104,20 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
     }
     fresh.push(v.event);
   }
-  if (dbEnabled() && fresh.length) await insertEvents(fresh, node.id); // throws: node keeps its events and retries
+  // Several nodes often deliver the same event at the same moment. The database decides who was
+  // first (ON CONFLICT DO NOTHING); every other copy counts as a duplicate, not a delivery.
+  const inserted = dbEnabled() && fresh.length ? await insertEvents(fresh, node.id) : null; // throws: node keeps its events and retries
+  const delivered: SignedEvent[] = [];
   for (const ev of fresh) {
+    if ((inserted && !inserted.has(ev.id)) || c.store.has(ev.id)) {
+      result.duplicates.push(ev.id);
+      continue;
+    }
     c.store.add(ev);
     c.receivedAt.set(ev.id, Date.now());
     c.deliveredBy.set(ev.id, node.name);
     result.accepted.push(ev.id);
+    delivered.push(ev);
   }
   const seen = c.nodes.get(node.id) ?? { id: node.id, name: node.name, lastSeenAt: 0, delivered: 0 };
   seen.lastSeenAt = Date.now();
@@ -119,8 +127,8 @@ export async function ingest(node: { id: string; name: string }, raw: unknown[])
   if (dbEnabled() && (raw.length || result.rejected.length)) {
     recordDelivery(node.id, node.name, result.accepted.length, result.duplicates.length, result.rejected.length).catch(() => {});
   }
-  if (fresh.length) {
-    emit({ type: "delivery", node, events: fresh.map((e) => ({ id: e.id, kind: e.kind, household: e.household, origin: e.origin, incident: e.incident })) });
+  if (delivered.length) {
+    emit({ type: "delivery", node, events: delivered.map((e) => ({ id: e.id, kind: e.kind, household: e.household, origin: e.origin, incident: e.incident })) });
   }
   return result;
 }
@@ -133,7 +141,7 @@ export async function setOutage(down: boolean): Promise<void> {
 }
 
 /** A coordinator or the voice agent acts on a household. Signed with the city's own key. */
-export async function cityAction(kind: "ok" | "ack", household: string, opts: { incident?: string; note?: string } = {}): Promise<SignedEvent> {
+export async function cityAction(kind: "ok" | "ack", household: string, opts: { incident?: string; note?: string } = {}): Promise<SignedEvent | null> {
   const c = city();
   await c.ready;
   const reg = registry().households[household];
@@ -144,7 +152,10 @@ export async function cityAction(kind: "ok" | "ack", household: string, opts: { 
   if (kind === "ack") {
     // A home can have several open calls if the beacon was pressed again. Answer all of them.
     const open = project(c.store.all()).incidents.filter((i) => i.household === household && i.status === "open");
-    if (!open.length) throw new Error("no open call for help at this household");
+    if (!open.length) {
+      if (project(c.store.all()).incidents.some((i) => i.household === household && i.status === "acknowledged")) return null;
+      throw new Error("no open call for help at this household");
+    }
     events = open.map((inc) => createEvent(identity, clock, { ...base, kind: "ack", ref: inc.eventId }));
   } else {
     events = [createEvent(identity, clock, { ...base, kind: "ok" })];

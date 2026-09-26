@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import type { CitySnapshot } from "./city";
 import { NEED_LABELS, registry } from "./registry";
-import { TriageOutput, collapseByHousehold, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
+import { TriageOutput, collapseByHousehold, describeGeminiFailure, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
 
 const SYSTEM = `You help emergency coordinators decide who to reach first during a city-wide power outage.
 You receive open calls for help as JSON. Each has a short reference, how long it has waited, how many
@@ -107,31 +107,35 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return decorate(ruleRanking(cases), "rules", { note: "Gemini is not configured, so calls are ordered by the built-in rules." });
 
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const payload = cases.map(({ needs, ...c }) => ({ ...c, needs: needs.map((n) => n.id) }));
-    const call = ai.models.generateContent({
-      model,
-      contents: [{ role: "user", parts: [{ text: `Open calls:\n${JSON.stringify(payload)}` }] }],
-      config: {
-        systemInstruction: SYSTEM,
-        responseMimeType: "application/json",
-        responseJsonSchema: SCHEMA,
-        temperature: 0.2,
-      },
-    });
-    const response = await Promise.race([
-      call,
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("Gemini took longer than 12 seconds")), 12_000)),
-    ]);
-    const parsed = TriageOutput.safeParse(JSON.parse(response.text ?? "{}"));
-    if (!parsed.success) throw new Error("Gemini returned an unexpected shape");
-    const result = decorate(reconcile(cases, parsed.data.ranking), "gemini", { model });
-    g.__plTriageCache = { key, result };
-    return result;
-  } catch (err) {
-    console.error("[triage] falling back to rules:", (err as Error).message);
-    return decorate(ruleRanking(cases), "rules", { note: "Gemini did not answer in time, so calls are ordered by the built-in rules." });
+  const models = [...new Set([process.env.GEMINI_MODEL || "gemini-3.6-flash", process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash"])];
+  const ai = new GoogleGenAI({ apiKey });
+  const payload = cases.map(({ needs, ...c }) => ({ ...c, needs: needs.map((n) => n.id) }));
+  let lastError: Error = new Error("Gemini is unavailable");
+  for (const model of models) {
+    try {
+      const call = ai.models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: `Open calls:\n${JSON.stringify(payload)}` }] }],
+        config: {
+          systemInstruction: SYSTEM,
+          responseMimeType: "application/json",
+          responseJsonSchema: SCHEMA,
+          temperature: 0.2,
+        },
+      });
+      const response = await Promise.race([
+        call,
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("Gemini took longer than 6 seconds")), 6_000)),
+      ]);
+      const parsed = TriageOutput.safeParse(JSON.parse(response.text ?? "{}"));
+      if (!parsed.success) throw new Error("Gemini returned an unexpected shape");
+      const result = decorate(reconcile(cases, parsed.data.ranking), "gemini", { model });
+      g.__plTriageCache = { key, result };
+      return result;
+    } catch (err) {
+      lastError = err as Error;
+    }
   }
+  console.error("[triage] falling back to rules:", lastError.message);
+  return decorate(ruleRanking(cases), "rules", { note: describeGeminiFailure(lastError.message) });
 }

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return Response.json({ ok: false, reason: "invalid action" }, { status: 400 });
   try {
     const ev = await cityAction(parsed.data.kind, parsed.data.household, parsed.data);
-    return Response.json({ ok: true, eventId: ev.id });
+    return Response.json({ ok: true, eventId: ev?.id ?? null, already: ev === null });
   } catch (err) {
     return Response.json({ ok: false, reason: (err as Error).message }, { status: 409 });
   }

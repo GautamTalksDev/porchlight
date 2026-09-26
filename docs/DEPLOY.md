@@ -103,7 +103,7 @@ The migration creates a hypertable for events, turns on compression for history 
 ## 6. Gemini: who first
 
 1. Create an API key in [Google AI Studio](https://aistudio.google.com).
-2. Set `GEMINI_API_KEY`. `GEMINI_MODEL` defaults to `gemini-flash-latest`.
+2. Set `GEMINI_API_KEY`. `GEMINI_MODEL` defaults to `gemini-3.6-flash`, with `gemini-2.5-flash` as the automatic backup.
 
 The queue header changes from "ranked by the built-in rules" to "Ranked by Gemini" once it works.
 

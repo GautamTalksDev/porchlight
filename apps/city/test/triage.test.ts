@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { collapseByHousehold, reconcile, ruleRanking, sanitizeNote, type TriageCase } from "../lib/triage-core.ts";
+import { collapseByHousehold, describeGeminiFailure, reconcile, ruleRanking, sanitizeNote, type TriageCase } from "../lib/triage-core.ts";
 
 const cases: TriageCase[] = [
   { ref: "R1", status: "open", waitMinutes: 5, witnesses: 1, needs: [], lang: "en" },
@@ -50,5 +50,26 @@ describe("one card per home", () => {
     const h1 = out.find((i) => i.household === "h1")!;
     assert.equal(h1.key, "a3");
     assert.deepEqual([...h1.witnesses].sort(), ["n1", "n2"]);
+  });
+});
+
+describe("Gemini failure notes", () => {
+  it("describes busy, timeout, key, and generic failures", () => {
+    assert.equal(
+      describeGeminiFailure("503 UNAVAILABLE"),
+      "Gemini is busy right now, so calls are ordered by the built-in rules.",
+    );
+    assert.equal(
+      describeGeminiFailure("Gemini took longer than 6 seconds"),
+      "Gemini did not answer in time, so calls are ordered by the built-in rules.",
+    );
+    assert.equal(
+      describeGeminiFailure("403 permission denied"),
+      "Gemini rejected the API key, so calls are ordered by the built-in rules.",
+    );
+    assert.equal(
+      describeGeminiFailure("something else"),
+      "Gemini is unavailable, so calls are ordered by the built-in rules.",
+    );
   });
 });
