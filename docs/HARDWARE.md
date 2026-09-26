@@ -25,7 +25,7 @@ flowchart LR
 
 ## Fall detection
 
-When fall detection is on (`FALL_DETECTION 1` in `config.h`), the on-board motion sensor watches for a short free fall or a hard impact, then a moment of stillness. If that sequence looks like a fall, the LED blinks purple for 10 seconds. Press the button in that window to cancel. If you do not cancel, the beacon sends a fall frame (the same path as a help press, including resends until a neighbour acknowledges).
+When fall detection is on (`FALL_DETECTION 1` in `config.h`), the on-board motion sensor watches for a short free fall (magnitude below 0.45 g for at least 80 ms), then an impact, then a moment of stillness. A hard knock alone, such as setting the beacon on a desk, does not start the sequence. If that free-fall sequence looks like a fall, the LED blinks purple for 10 seconds. Press the button in that window to cancel. If you do not cancel, the beacon sends a fall frame (the same path as a help press, including resends until a neighbour acknowledges).
 
 You can exercise the countdown without dropping the board by typing `PLX` in the Serial Monitor.
 

@@ -246,13 +246,11 @@ void pollFall() {
   switch (fallPhase) {
     case FallPhase::Idle:
       if (!haveReading) break;
-      if (mag > 3.2f) {
-        fallPhase = FallPhase::Impact;
-        fallPhaseAt = t;
-        freefallLowAt = 0;
-      } else if (mag < 0.45f) {
+      // Only a sustained free fall can start the sequence. A hard knock alone (desk set-down)
+      // must not jump straight to IMPACT.
+      if (mag < 0.45f) {
         if (!freefallLowAt) freefallLowAt = t;
-        else if (t - freefallLowAt >= 50) {
+        else if (t - freefallLowAt >= 80) {
           fallPhase = FallPhase::Freefall;
           fallPhaseAt = t;
           freefallLowAt = 0;
