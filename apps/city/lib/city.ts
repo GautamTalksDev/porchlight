@@ -1,9 +1,8 @@
 import "server-only";
 import {
-  EventStore,
+  type EventStore,
   REPLY_LABELS,
   CITY_BROADCAST_HOUSEHOLD,
-  compareHlc,
   createEvent,
   decodeHlc,
   escalationTier,
@@ -14,10 +13,11 @@ import {
 } from "@porchlight/protocol";
 import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
 import { buildNeighbourThread, circleWindows } from "./circles";
+import { cityEventsDownlink, createCityEventStore, noticesFromEvents } from "./city-notices";
 import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, clearDemoTables, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
 import { classifyIngestItem } from "./ingest-verify";
-import { noticeReachStats, recordNoticeConfirmations } from "./notice-delivery";
+import { recordNoticeConfirmations } from "./notice-delivery";
 import { NEED_LABELS, registry } from "./registry";
 import { computeSilent } from "./silence";
 import { shouldSkipAnalytics } from "./analytics-backoff";
@@ -57,9 +57,10 @@ const g = globalThis as unknown as { __plCity?: CityState };
 /** The city's in-memory view, backed by Tiger Data when DATABASE_URL is set. One per server process. */
 export function city(): CityState {
   if (g.__plCity) return g.__plCity;
+  const cityId = cityIdentity().identity.id;
   const state: CityState = {
     ready: Promise.resolve(),
-    store: new EventStore(),
+    store: createCityEventStore(cityId),
     nodes: new Map(),
     receivedAt: new Map(),
     deliveredBy: new Map(),
@@ -110,15 +111,8 @@ export interface IngestResult {
 }
 
 /** City-origin events the node should pull down and gossip to neighbours. */
-function cityEventsDownlink(): SignedEvent[] {
-  const c = city();
-  const cityId = cityIdentity().identity.id;
-  const cutoff = Date.now() - 24 * 60 * 60_000;
-  return c.store
-    .all()
-    .filter((e) => e.origin === cityId && decodeHlc(e.hlc).wall >= cutoff)
-    .sort((a, b) => compareHlc(a.hlc, b.hlc))
-    .slice(0, 200);
+function downlink(): SignedEvent[] {
+  return cityEventsDownlink(city().store.all(), cityIdentity().identity.id);
 }
 
 function knownNoticeIds(c: CityState): Set<string> {
@@ -141,7 +135,7 @@ export async function ingest(
   const result: IngestResult = { accepted: [], duplicates: [], rejected: [], cityEvents: [], cityId };
   const fresh: SignedEvent[] = [];
   for (const item of raw) {
-    const verdict = classifyIngestItem(item, (id) => c.store.has(id));
+    const verdict = classifyIngestItem(item, (id) => c.store.has(id), { cityOrigin: cityId });
     if (verdict.status === "duplicate") {
       result.duplicates.push(verdict.id);
       continue;
@@ -183,7 +177,7 @@ export async function ingest(
   if (delivered.length) {
     emit({ type: "delivery", node, events: delivered.map((e) => ({ id: e.id, kind: e.kind, household: e.household, origin: e.origin, incident: e.incident })) });
   }
-  result.cityEvents = cityEventsDownlink();
+  result.cityEvents = downlink();
   return result;
 }
 
@@ -212,7 +206,7 @@ export async function setEmergency(active: boolean): Promise<number | null> {
 export async function resetDemo(): Promise<void> {
   const c = city();
   await c.ready;
-  c.store = new EventStore();
+  c.store = createCityEventStore(cityIdentity().identity.id);
   c.nodes.clear();
   c.receivedAt.clear();
   c.deliveredBy.clear();
@@ -240,7 +234,10 @@ export async function publishNotice(notice: NoticePayload): Promise<SignedEvent>
     source: { type: "console" },
   });
   if (dbEnabled()) await insertEvents([ev], identity.id);
-  c.store.add(ev);
+  const added = c.store.add(ev);
+  if (!added.added && added.reason !== "duplicate") {
+    throw new Error(`could not store notice: ${added.reason}`);
+  }
   c.receivedAt.set(ev.id, Date.now());
   c.noticeConfirmations.set(ev.id, new Set());
   emit({ type: "action", kind: "notice", household: CITY_BROADCAST_HOUSEHOLD });
@@ -403,25 +400,13 @@ export async function snapshot() {
     thresholdMinutes,
   });
 
-  const cityNoticeEvents = events
-    .filter((e) => e.kind === "notice" && e.origin === cityId && e.notice)
-    .sort((a, b) => decodeHlc(b.hlc).wall - decodeHlc(a.hlc).wall);
-  const cityNoticeIds = cityNoticeEvents.map((e) => e.id);
   const totalNodes = Math.max(Object.keys(reg.nodes).length, 1);
-  const noticeDelivery = noticeReachStats(cityNoticeIds, c.noticeConfirmations, totalNodes);
-  const reachById = new Map(noticeDelivery.map((r) => [r.noticeId, r]));
-  const notices = cityNoticeEvents.map((e) => {
-    const reach = reachById.get(e.id);
-    return {
-      id: e.id,
-      en: e.notice!.en,
-      fr: e.notice!.fr,
-      severity: e.notice!.severity,
-      at: decodeHlc(e.hlc).wall,
-      reachedNodes: reach?.reachedNodes ?? 0,
-      totalNodes: reach?.totalNodes ?? totalNodes,
-    };
-  });
+  const notices = noticesFromEvents(events, cityId, c.noticeConfirmations, totalNodes);
+  const noticeDelivery = notices.map((n) => ({
+    noticeId: n.id,
+    reachedNodes: n.reachedNodes,
+    totalNodes: n.totalNodes,
+  }));
 
   return {
     generatedAt: now,

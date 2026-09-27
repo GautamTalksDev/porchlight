@@ -74,6 +74,13 @@ export default function OpsRoom({
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
   const noticesApiRef = useRef<NoticesApi | null>(null);
+  const lastToastRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
+  const showToast = useCallback((text: string) => {
+    const now = Date.now();
+    if (lastToastRef.current.text === text && now - lastToastRef.current.at < 1500) return;
+    lastToastRef.current = { text, at: now };
+    setNotice(text);
+  }, []);
   const [, setTick] = useState(0);
   const cityRef = useRef<PorchlightCity | null>(null);
   const snapRef = useRef<CitySnapshot | null>(null);
@@ -196,9 +203,9 @@ export default function OpsRoom({
     try {
       setTriage(await post("/api/triage", {}));
     } catch (err) {
-      setNotice((err as Error).message);
+      showToast((err as Error).message);
     }
-  }, []);
+  }, [showToast]);
   useEffect(() => {
     if (!snap) return;
     const t = setTimeout(refreshTriage, 500);
@@ -301,29 +308,29 @@ export default function OpsRoom({
       if (!household) return;
       try {
         const result = await post("/api/actions", { kind, household: household.id, incident: incident?.key });
-        if (kind === "ack" && result.already) setNotice(`Help is already on the way to ${household.label}`);
-        else setNotice(kind === "ok" ? `${household.label} marked safe` : `Someone is on the way to ${household.label}`);
+        if (kind === "ack" && result.already) showToast(`Help is already on the way to ${household.label}`);
+        else showToast(kind === "ok" ? `${household.label} marked safe` : `Someone is on the way to ${household.label}`);
       } catch (err) {
-        setNotice((err as Error).message);
+        showToast((err as Error).message);
       }
     },
-    [household, incident],
+    [household, incident, showToast],
   );
 
   const toggleOutage = async () => {
     try {
       await post("/api/outage", { down: !snap?.outage });
     } catch (err) {
-      setNotice((err as Error).message);
+      showToast((err as Error).message);
     }
   };
 
   const toggleEmergency = async () => {
     try {
       await post("/api/emergency", { active: !snap?.emergencySince });
-      setNotice(snap?.emergencySince ? "Emergency ended" : "Emergency declared");
+      showToast(snap?.emergencySince ? "Emergency ended" : "Emergency declared");
     } catch (err) {
-      setNotice((err as Error).message);
+      showToast((err as Error).message);
     }
   };
 
@@ -334,11 +341,11 @@ export default function OpsRoom({
         household: householdId,
         note: `Proactive wellness check: not heard from for ${minutesSilent} minutes`,
       });
-      if (result.already) setNotice(`Help is already on the way to ${label}`);
-      else setNotice(`Someone is on the way to ${label}`);
+      if (result.already) showToast(`Help is already on the way to ${label}`);
+      else showToast(`Someone is on the way to ${label}`);
       void refreshTriage();
     } catch (err) {
-      setNotice((err as Error).message);
+      showToast((err as Error).message);
     }
   };
 
@@ -347,10 +354,10 @@ export default function OpsRoom({
     try {
       await post("/api/demo/reset", {});
       setResetConfirm(false);
-      setNotice("Demo reset. Every call, reply and notice is cleared.");
+      showToast("Demo reset. Every call, reply and notice is cleared.");
       void refreshTriage();
     } catch (err) {
-      setNotice((err as Error).message);
+      showToast((err as Error).message);
     } finally {
       setResetBusy(false);
     }
@@ -628,7 +635,7 @@ export default function OpsRoom({
           notices={snap?.notices ?? []}
           onSent={() => {
             cityRef.current?.announceNotice();
-            setNotice("Notice sent to the street");
+            showToast("Notice sent to the street");
             void refreshTriage();
           }}
         />

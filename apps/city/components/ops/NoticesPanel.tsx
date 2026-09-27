@@ -50,6 +50,7 @@ export const NoticesPanel = forwardRef<
   const severityRef = useRef(severity);
   const onOpenChangeRef = useRef(onOpenChange);
   const onSentRef = useRef(onSent);
+  const sendingRef = useRef(false);
   enRef.current = en;
   frRef.current = fr;
   severityRef.current = severity;
@@ -91,6 +92,9 @@ export const NoticesPanel = forwardRef<
   };
 
   const send = async () => {
+    if (sendingRef.current) {
+      return { ok: false as const, reason: "Send already in progress" };
+    }
     const enT = enRef.current.trim();
     const frT = frRef.current.trim();
     if (!enT || !frT) {
@@ -99,6 +103,7 @@ export const NoticesPanel = forwardRef<
         reason: !enT && !frT ? "English and French are both required" : !enT ? "English is missing" : "French is missing",
       };
     }
+    sendingRef.current = true;
     setBusy(true);
     try {
       const r = await post("/api/notices", { en: enT, fr: frT, severity: severityRef.current });
@@ -112,6 +117,7 @@ export const NoticesPanel = forwardRef<
       onSentRef.current();
       return { ok: true as const };
     } finally {
+      sendingRef.current = false;
       setBusy(false);
     }
   };

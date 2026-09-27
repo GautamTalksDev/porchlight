@@ -56,10 +56,12 @@ flowchart LR
 
 ## Before every rehearsal
 
+Reset the city before the nodes so a fresh node uplink cannot re-deliver old events into a wiped city log.
+
+* [ ] In the operations room, press **Shift+R** and confirm **Reset** (requires `DEMO_RESET_ENABLED=true`).
 * [ ] Stop the nodes (`Ctrl+C` in the demo terminal).
 * [ ] `npm run demo:reset` (clears each demo node's event log and delivery state, keeps identity keys).
 * [ ] Start the nodes again with `npm run demo:local` (and the city app if you use a real city).
-* [ ] In the operations room, press **Shift+R** and confirm **Reset** (requires `DEMO_RESET_ENABLED=true`).
 * [ ] Press **P** and confirm every preflight check is green.
 * [ ] Connect the beacon (Bluetooth or USB) on Node A.
 
