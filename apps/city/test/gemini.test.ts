@@ -10,9 +10,11 @@ import {
   isGeminiQuotaError,
   markGeminiQuotaExhausted,
   resolveGeminiModels,
+  shouldDeferGeminiTriage,
   shouldReuseTriageCache,
   TRIAGE_GEMINI_MIN_INTERVAL_MS,
 } from "../lib/gemini.ts";
+import { ruleRanking, type TriageCase } from "../lib/triage-core.ts";
 
 describe("gemini model list", () => {
   it("uses GEMINI_MODELS when set, else legacy pair, else the default list", () => {
@@ -55,7 +57,7 @@ describe("gemini quota cooldown", () => {
 });
 
 describe("triage throttle", () => {
-  it("reuses the cached result when facts are unchanged or the interval has not elapsed", () => {
+  it("reuses the cached result only when the open-case fingerprint is unchanged", () => {
     const t0 = 50_000;
     assert.equal(
       shouldReuseTriageCache({ key: "same", cachedKey: "same", lastCallAt: t0, now: t0 + 120_000 }),
@@ -68,10 +70,24 @@ describe("triage throttle", () => {
         lastCallAt: t0,
         now: t0 + TRIAGE_GEMINI_MIN_INTERVAL_MS - 1,
       }),
+      false,
+    );
+    assert.equal(shouldReuseTriageCache({ key: "a", now: t0 }), false);
+  });
+
+  it("defers Gemini when cases change inside the interval, without reusing the stale ranking", () => {
+    const t0 = 50_000;
+    assert.equal(
+      shouldDeferGeminiTriage({
+        key: "changed",
+        cachedKey: "same",
+        lastCallAt: t0,
+        now: t0 + TRIAGE_GEMINI_MIN_INTERVAL_MS - 1,
+      }),
       true,
     );
     assert.equal(
-      shouldReuseTriageCache({
+      shouldDeferGeminiTriage({
         key: "changed",
         cachedKey: "same",
         lastCallAt: t0,
@@ -79,6 +95,52 @@ describe("triage throttle", () => {
       }),
       false,
     );
-    assert.equal(shouldReuseTriageCache({ key: "a", now: t0 }), false);
+    assert.equal(
+      shouldDeferGeminiTriage({
+        key: "same",
+        cachedKey: "same",
+        lastCallAt: t0,
+        now: t0 + 1,
+      }),
+      false,
+    );
+  });
+
+  it("a new case inside the throttle window appears in the rules catch-up ranking", () => {
+    const before: TriageCase[] = [
+      { ref: "R1", status: "open", waitMinutes: 5, witnesses: 1, needs: [], lang: "en" },
+    ];
+    const after: TriageCase[] = [
+      ...before,
+      {
+        ref: "R2",
+        status: "open",
+        waitMinutes: 1,
+        witnesses: 1,
+        needs: [{ id: "oxygen-concentrator", weight: 40 }],
+        lang: "en",
+      },
+    ];
+    const t0 = 10_000;
+    assert.equal(
+      shouldDeferGeminiTriage({
+        key: "after",
+        cachedKey: "before",
+        lastCallAt: t0,
+        now: t0 + 5_000,
+      }),
+      true,
+    );
+    // While Gemini is deferred, the queue must be a rules ranking of CURRENT cases.
+    const ranked = ruleRanking(after);
+    assert.equal(ranked.length, 2);
+    assert.equal(
+      ranked.some((r) => r.ref === "R2"),
+      true,
+    );
+    assert.equal(
+      ranked.some((r) => r.ref === "R1"),
+      true,
+    );
   });
 });

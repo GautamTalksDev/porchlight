@@ -1,10 +1,10 @@
 /**
  * Pure helpers for "the call's journey": how a help event physically reached City Hall.
+ * Kept free of server-only and Node built-ins so the ops room client can import it safely.
  */
 
-import { CITY_BROADCAST_HOUSEHOLD } from "@porchlight/protocol";
-
-export const CITY_HALL_ID = CITY_BROADCAST_HOUSEHOLD;
+/** Same slug as CITY_BROADCAST_HOUSEHOLD in the protocol package. */
+export const CITY_HALL_ID = "city-hall";
 export const CITY_HALL_LABEL = "City Hall";
 /** Short holds under this are clock skew / latency, not an outage pause on the map. */
 export const HOLD_PAUSE_MS = 3000;
@@ -37,9 +37,96 @@ export interface BuildJourneyInput {
   householdLabels: Record<string, string>;
 }
 
+export interface TrailEntryForJourney {
+  kind: string;
+  by: string;
+  via: string | null;
+  source: string;
+  heldMs?: number;
+}
+
 function labelOf(id: string, labels: Record<string, string>): string {
   if (id === CITY_HALL_ID) return CITY_HALL_LABEL;
   return labels[id] ?? id;
+}
+
+/**
+ * Merge registry node homes with live ingest reports.
+ * Live household wins when a node sent NODE_HOUSEHOLD; otherwise the registry fills the gap.
+ */
+export function resolveNodeHouseholds(input: {
+  registryNodes: Record<string, string>;
+  liveNodes?: { name: string; household?: string | null; houseId?: string | null }[];
+}): Record<string, string> {
+  const out: Record<string, string> = { ...input.registryNodes };
+  for (const n of input.liveNodes ?? []) {
+    const home = n.household || n.houseId || out[n.name];
+    if (home) out[n.name] = home;
+  }
+  return out;
+}
+
+/** Turn a trail "by" / "via" label into a node name that exists in nodeHouseholds when possible. */
+export function resolveTrailNodeName(
+  label: string | null | undefined,
+  nodeHouseholds: Record<string, string>,
+  nodes?: { id: string; name: string }[],
+): string | null {
+  if (!label || label === "the city") return null;
+  if (nodeHouseholds[label]) return label;
+  if (label.startsWith("node ") && nodes?.length) {
+    const prefix = label.slice(5);
+    const hit = nodes.find((n) => n.id.startsWith(prefix));
+    if (hit) return hit.name;
+  }
+  // Pass through names the registry may still know once households are merged.
+  return label;
+}
+
+/**
+ * Build hops from a household's trust trail (and optional open-call fallback).
+ * Any call with a resolvable trail entry always gets at least the hops that can be built.
+ */
+export function journeyFromTrail(input: {
+  householdId: string;
+  householdLabel: string;
+  trail: TrailEntryForJourney[];
+  nodeHouseholds: Record<string, string>;
+  householdLabels: Record<string, string>;
+  nodes?: { id: string; name: string }[];
+  /** When trail is empty but this home has an open call, still return a City Hall hop. */
+  hasOpenCall?: boolean;
+}): JourneyHop[] {
+  const help =
+    input.trail.find((t) => t.kind === "help") ??
+    input.trail.find((t) => t.source === "beacon") ??
+    input.trail[0];
+
+  if (!help) {
+    if (!input.hasOpenCall) return [];
+    return buildJourney({
+      event: { household: input.householdId, source: { type: "console" } },
+      householdLabel: input.householdLabel,
+      originNode: null,
+      deliveredBy: null,
+      nodeHouseholds: input.nodeHouseholds,
+      householdLabels: input.householdLabels,
+    });
+  }
+
+  const originNode = resolveTrailNodeName(help.by, input.nodeHouseholds, input.nodes);
+  const deliveredBy =
+    resolveTrailNodeName(help.via, input.nodeHouseholds, input.nodes) ?? originNode;
+
+  return buildJourney({
+    event: { household: input.householdId, source: { type: help.source || "console" } },
+    householdLabel: input.householdLabel,
+    originNode,
+    deliveredBy,
+    heldMs: help.heldMs,
+    nodeHouseholds: input.nodeHouseholds,
+    householdLabels: input.householdLabels,
+  });
 }
 
 /**

@@ -122,8 +122,8 @@ export function geminiQuotaPreflightDetail(
 }
 
 /**
- * Reuse a cached triage ranking when the open-case fingerprint is unchanged,
- * or when a Gemini call was made less than minIntervalMs ago.
+ * Reuse a cached triage ranking only when the open-case fingerprint is unchanged.
+ * A recent Gemini call must never suppress a fresh rules ranking of new cases.
  */
 export function shouldReuseTriageCache(input: {
   key: string;
@@ -132,8 +132,23 @@ export function shouldReuseTriageCache(input: {
   now: number;
   minIntervalMs?: number;
 }): boolean {
+  if (input.cachedKey == null) return false;
+  return input.cachedKey === input.key;
+}
+
+/**
+ * True when cases changed but a Gemini call was made less than minIntervalMs ago.
+ * Callers should return a rules ranking of the CURRENT cases, not the stale cache.
+ */
+export function shouldDeferGeminiTriage(input: {
+  key: string;
+  cachedKey?: string;
+  lastCallAt?: number;
+  now: number;
+  minIntervalMs?: number;
+}): boolean {
   if (input.cachedKey == null || input.lastCallAt == null) return false;
-  if (input.cachedKey === input.key) return true;
+  if (input.cachedKey === input.key) return false;
   return input.now - input.lastCallAt < (input.minIntervalMs ?? TRIAGE_GEMINI_MIN_INTERVAL_MS);
 }
 

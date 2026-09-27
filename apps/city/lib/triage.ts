@@ -8,6 +8,7 @@ import {
   availableGeminiModels,
   isGeminiQuotaError,
   markGeminiQuotaExhausted,
+  shouldDeferGeminiTriage,
   shouldReuseTriageCache,
   TRIAGE_GEMINI_MIN_INTERVAL_MS,
 } from "./gemini";
@@ -152,6 +153,23 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
     })
   ) {
     return cached.result;
+  }
+
+  // Cases changed inside the Gemini cooldown: never return the stale ranking.
+  // Show every current open call via rules, then let Gemini replace this once allowed.
+  if (
+    cached &&
+    shouldDeferGeminiTriage({
+      key,
+      cachedKey: cached.key,
+      lastCallAt: cached.lastCallAt,
+      now,
+      minIntervalMs: TRIAGE_GEMINI_MIN_INTERVAL_MS,
+    })
+  ) {
+    return decorate(ruleRanking(cases), "rules", {
+      note: "Ranked by the built-in rules while Gemini catches up",
+    });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;

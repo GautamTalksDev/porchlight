@@ -14,9 +14,10 @@ import {
 import { decideAck, VOICE_ESCALATION_NOTE } from "./ack-decision";
 import { buildNeighbourThread, circleWindows } from "./circles";
 import { cityEventsDownlink, createCityEventStore, noticesFromEvents } from "./city-notices";
-import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, recordDelivery, setSetting, timeline, clearDemoTables, type TimelineBucket } from "./db";
+import { dbEnabled, foldTimeline, getSetting, holdStats, insertEvents, loadAllEvents, loadRecentNodeNames, recordDelivery, setSetting, timeline, clearDemoTables, type TimelineBucket } from "./db";
 import { cityIdentity } from "./identity";
 import { classifyIngestItem } from "./ingest-verify";
+import { resolveNodeHouseholds, journeyFromTrail, type JourneyHop } from "./journey";
 import { recordNoticeConfirmations } from "./notice-delivery";
 import { NEED_LABELS, registry } from "./registry";
 import { computeSilent } from "./silence";
@@ -75,7 +76,33 @@ export function city(): CityState {
   state.ready = (async () => {
     if (!dbEnabled()) return;
     try {
-      for (const raw of await loadAllEvents()) state.store.add(raw);
+      for (const row of await loadAllEvents()) {
+        const ev = row.body as SignedEvent;
+        if (!ev?.id) continue;
+        state.store.add(ev);
+        if (row.deliveredBy) state.deliveredBy.set(ev.id, row.deliveredBy);
+        if (row.receivedAtMs != null && Number.isFinite(row.receivedAtMs)) {
+          state.receivedAt.set(ev.id, row.receivedAtMs);
+        }
+      }
+      for (const n of await loadRecentNodeNames()) {
+        const regHome = registry().nodes[n.name] ?? null;
+        const seen = state.nodes.get(n.id) ?? {
+          id: n.id,
+          name: n.name,
+          household: regHome,
+          lastSeenAt: 0,
+          delivered: 0,
+        };
+        seen.name = n.name;
+        if (!seen.household && regHome) seen.household = regHome;
+        state.nodes.set(n.id, seen);
+      }
+      // Prefer node names in deliveredBy when the column still holds a legacy node id.
+      for (const [eventId, who] of state.deliveredBy) {
+        const byId = state.nodes.get(who);
+        if (byId) state.deliveredBy.set(eventId, byId.name);
+      }
       state.outage = (await getSetting<boolean>("outage")) ?? false;
       state.emergencySince = (await getSetting<number | null>("emergencySince")) ?? null;
       console.log(`[city] loaded ${state.store.size} events from Tiger Data`);
@@ -154,7 +181,7 @@ export async function ingest(
   }
   // Several nodes often deliver the same event at the same moment. The database decides who was
   // first (ON CONFLICT DO NOTHING); every other copy counts as a duplicate, not a delivery.
-  const inserted = dbEnabled() && fresh.length ? await insertEvents(fresh, node.id) : null; // throws: node keeps its events and retries
+  const inserted = dbEnabled() && fresh.length ? await insertEvents(fresh, node.name) : null; // throws: node keeps its events and retries
   const delivered: SignedEvent[] = [];
   for (const ev of fresh) {
     if ((inserted && !inserted.has(ev.id)) || c.store.has(ev.id)) {
@@ -167,11 +194,13 @@ export async function ingest(
     result.accepted.push(ev.id);
     delivered.push(ev);
   }
+  const regHome = registry().nodes[node.name] ?? null;
+  const house = node.household ?? regHome;
   const seen = c.nodes.get(node.id) ?? { id: node.id, name: node.name, household: null, lastSeenAt: 0, delivered: 0 };
   seen.lastSeenAt = Date.now();
   seen.delivered += result.accepted.length;
   seen.name = node.name;
-  if (node.household) seen.household = node.household;
+  if (house) seen.household = house;
   c.nodes.set(node.id, seen);
   recordNoticeConfirmations(c.noticeConfirmations, node.id, heldNoticeIds, knownNoticeIds(c));
   if (dbEnabled() && (raw.length || result.rejected.length)) {
@@ -442,9 +471,28 @@ export async function snapshot() {
     totalNodes: n.totalNodes,
   }));
 
-  const nodeHouseholds: Record<string, string> = { ...reg.nodes };
-  for (const n of c.nodes.values()) {
-    if (n.household) nodeHouseholds[n.name] = n.household;
+  const nodeHouseholds = resolveNodeHouseholds({
+    registryNodes: reg.nodes,
+    liveNodes: [...c.nodes.values()],
+  });
+
+  const householdLabels: Record<string, string> = {};
+  for (const h of households) householdLabels[h.id] = h.label;
+  const journeys: Record<string, JourneyHop[]> = {};
+  for (const h of households) {
+    const entries = trail[h.id] ?? [];
+    const open = incidents.some((i) => i.household === h.id && i.status !== "resolved");
+    if (!entries.length && !open) continue;
+    const hops = journeyFromTrail({
+      householdId: h.id,
+      householdLabel: h.label,
+      trail: entries,
+      nodeHouseholds,
+      householdLabels,
+      nodes: [...c.nodes.values()].map((n) => ({ id: n.id, name: n.name })),
+      hasOpenCall: open,
+    });
+    if (hops.length) journeys[h.id] = hops;
   }
 
   return {
@@ -463,6 +511,7 @@ export async function snapshot() {
     })),
     nodeHouses: reg.nodes,
     nodeHouseholds,
+    journeys,
     timeline: tl,
     holdSeconds: hold,
     noticeDelivery,

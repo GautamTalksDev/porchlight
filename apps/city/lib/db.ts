@@ -41,9 +41,36 @@ export async function insertEvents(events: SignedEvent[], deliveredBy: string): 
   return new Set(res.rows.map((r) => r.id));
 }
 
-export async function loadAllEvents(): Promise<unknown[]> {
-  const res = await pool().query<{ body: unknown }>("SELECT body FROM events ORDER BY event_time ASC LIMIT 100000");
-  return res.rows.map((r) => r.body);
+export interface LoadedEventRow {
+  body: unknown;
+  /** Node name (preferred) or legacy node id that delivered the event. */
+  deliveredBy: string | null;
+  receivedAtMs: number | null;
+}
+
+export async function loadAllEvents(): Promise<LoadedEventRow[]> {
+  const res = await pool().query<{ body: unknown; delivered_by: string | null; received_ms: string | null }>(
+    `SELECT body, delivered_by,
+            (EXTRACT(EPOCH FROM received_at) * 1000)::float8::text AS received_ms
+     FROM events ORDER BY event_time ASC LIMIT 100000`,
+  );
+  return res.rows.map((r) => ({
+    body: r.body,
+    deliveredBy: r.delivered_by,
+    receivedAtMs: r.received_ms != null ? Number(r.received_ms) : null,
+  }));
+}
+
+/** Latest known node id → name pairs from delivery logs, for trail labels after a restart. */
+export async function loadRecentNodeNames(): Promise<{ id: string; name: string }[]> {
+  const res = await pool().query<{ node_id: string; node_name: string }>(
+    `SELECT DISTINCT ON (node_id) node_id, node_name
+     FROM deliveries
+     WHERE node_name IS NOT NULL AND node_name <> ''
+     ORDER BY node_id, time DESC
+     LIMIT 500`,
+  );
+  return res.rows.map((r) => ({ id: r.node_id, name: r.node_name }));
 }
 
 export async function recordDelivery(nodeId: string, nodeName: string, accepted: number, duplicates: number, rejected: number) {

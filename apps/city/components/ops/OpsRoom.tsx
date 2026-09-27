@@ -6,7 +6,7 @@ import { Brand } from "@/components/ui/Brand";
 import type { CityMessage, CitySnapshot } from "@/lib/city";
 import type { PorchlightCity } from "@/lib/city/scene";
 import { isFall } from "@/lib/fall";
-import { buildJourney, formatJourneyBreadcrumb, type JourneyHop } from "@/lib/journey";
+import { formatJourneyBreadcrumb, journeyFromTrail, resolveNodeHouseholds, type JourneyHop } from "@/lib/journey";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { useCopilot } from "./useCopilot";
@@ -15,25 +15,26 @@ import { NoticesPanel, type NoticesApi } from "./NoticesPanel";
 import type { CopilotLive } from "./useCopilot";
 import { summarizePreflight, type PreflightCheck } from "@/lib/preflight";
 
-/** Build journey hops for a home from the latest help trail entry. */
+/** Build journey hops for a home from the snapshot trail (and server-built journeys when present). */
 function journeyHopsFor(snap: CitySnapshot, householdId: string): JourneyHop[] {
+  if (snap.journeys?.[householdId]?.length) return snap.journeys[householdId]!;
   const house = snap.households.find((h) => h.id === householdId);
   if (!house) return [];
-  const entries = snap.trail[householdId] ?? [];
-  const help = entries.find((t) => t.kind === "help") ?? entries[0];
-  if (!help) return [];
-  const originNode = help.by === "the city" ? null : help.by;
-  const deliveredBy = help.via ?? originNode;
+  const nodeHouseholds = resolveNodeHouseholds({
+    registryNodes: { ...(snap.nodeHouses ?? {}), ...(snap.nodeHouseholds ?? {}) },
+    liveNodes: snap.nodes ?? [],
+  });
   const householdLabels: Record<string, string> = {};
   for (const h of snap.households) householdLabels[h.id] = h.label;
-  return buildJourney({
-    event: { household: householdId, source: { type: help.source } },
+  const open = (snap.incidents ?? []).some((i) => i.household === householdId && i.status !== "resolved");
+  return journeyFromTrail({
+    householdId,
     householdLabel: house.label,
-    originNode,
-    deliveredBy,
-    heldMs: help.heldMs,
-    nodeHouseholds: snap.nodeHouseholds ?? {},
+    trail: snap.trail?.[householdId] ?? [],
+    nodeHouseholds,
     householdLabels,
+    nodes: (snap.nodes ?? []).map((n) => ({ id: n.id, name: n.name })),
+    hasOpenCall: open,
   });
 }
 
@@ -338,6 +339,7 @@ export default function OpsRoom({
     [selectedId, snap],
   );
   const journeyCrumb = journeyHops.length ? formatJourneyBreadcrumb(journeyHops) : "";
+  const showJourney = journeyHops.length > 0;
 
   useEffect(() => {
     cityRef.current?.select(selectedId);
@@ -951,7 +953,7 @@ export default function OpsRoom({
                 ) : null}
                 {voice.state !== "idle" && voice.state !== "error" ? <button className="btn btn-quiet btn-small" type="button" onClick={voice.end}>End call</button> : null}
               </section>
-              {journeyCrumb ? (
+              {showJourney ? (
                 <section className="journey-panel" aria-labelledby="journey-h">
                   <h3 id="journey-h" className="section-title">The call's journey</h3>
                   <p className="journey-crumb">{journeyCrumb}</p>

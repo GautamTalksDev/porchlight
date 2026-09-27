@@ -400,6 +400,7 @@ export class NodeAgent {
           node: {
             id: this.identity.id,
             name: this.config.name,
+            // Always include the home when known so the city can draw the call's journey.
             ...(this.config.household ? { household: this.config.household } : {}),
           },
           events: pending,

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildJourney, formatJourneyBreadcrumb, CITY_HALL_ID } from "../lib/journey.ts";
+import {
+  buildJourney,
+  formatJourneyBreadcrumb,
+  journeyFromTrail,
+  resolveNodeHouseholds,
+  CITY_HALL_ID,
+} from "../lib/journey.ts";
 
 const labels = {
   "hh-maple-12": "12 Maple Crescent",
@@ -135,5 +141,56 @@ describe("buildJourney", () => {
     });
     assert.equal(empty.length, 1);
     assert.equal(empty[0]!.kind, "To City Hall");
+  });
+});
+
+describe("journey from ingest snapshot", () => {
+  it("builds calling home, Bluetooth, node home, To City Hall when ingest includes the node household", () => {
+    // Mirrors city after ingest({ name: "node-a", household: "hh-oak-19" }, [beacon help for maple]).
+    const registryNodes = {
+      "node-a": "hh-oak-19",
+      "node-b": "hh-birch-4",
+      "node-c": "hh-cedar-31",
+    };
+    const nodeHouseholds = resolveNodeHouseholds({
+      registryNodes,
+      liveNodes: [{ name: "node-a", household: "hh-oak-19" }],
+    });
+    assert.equal(nodeHouseholds["node-a"], "hh-oak-19");
+
+    const trail = [
+      {
+        kind: "help",
+        by: "node-a",
+        via: "node-a",
+        source: "beacon",
+        heldMs: 400,
+      },
+    ];
+    const hops = journeyFromTrail({
+      householdId: "hh-maple-12",
+      householdLabel: "12 Maple Crescent",
+      trail,
+      nodeHouseholds,
+      householdLabels: labels,
+      nodes: [{ id: "aaaaaaaaaaaaaaaa", name: "node-a" }],
+      hasOpenCall: true,
+    });
+
+    assert.deepEqual(
+      hops.map((h) => h.kind),
+      ["Bluetooth", "To City Hall"],
+    );
+    assert.equal(hops[0]!.fromId, "hh-maple-12");
+    assert.equal(hops[0]!.fromLabel, "12 Maple Crescent");
+    assert.equal(hops[0]!.toId, "hh-oak-19");
+    assert.equal(hops[0]!.toLabel, "19 Oak Terrace");
+    assert.equal(hops[1]!.fromId, "hh-oak-19");
+    assert.equal(hops[1]!.kind, "To City Hall");
+    assert.equal(hops[1]!.toId, CITY_HALL_ID);
+    assert.equal(
+      formatJourneyBreadcrumb(hops),
+      "12 Maple Crescent, Bluetooth, 19 Oak Terrace, To City Hall",
+    );
   });
 });
