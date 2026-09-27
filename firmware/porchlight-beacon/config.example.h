@@ -35,7 +35,8 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 #define ALIVE_EVERY_SEC 20
 // How often to capture a presence frame when idle (demo 10 s; real deploys use minutes).
 #define PRESENCE_EVERY_SEC 10
-// Ambient clear channel below this is dark (hysteresis with LIGHT_BRIGHT).
-#define LIGHT_DARK 20
-// Ambient clear channel above this is bright (hysteresis with LIGHT_DARK).
-#define LIGHT_BRIGHT 60
+// Ambient clear below this is dark. Measured on our board: room about 4, flashlight about 116, covered 0.
+// Re-check with PLL in the room where you demo, since lighting varies.
+#define LIGHT_DARK 1
+// Ambient clear above this is bright (hysteresis with LIGHT_DARK). Same measured values as LIGHT_DARK.
+#define LIGHT_BRIGHT 3

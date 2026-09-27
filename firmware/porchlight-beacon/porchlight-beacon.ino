@@ -43,10 +43,10 @@
 #define PRESENCE_EVERY_SEC 10
 #endif
 #ifndef LIGHT_DARK
-#define LIGHT_DARK 20
+#define LIGHT_DARK 1
 #endif
 #ifndef LIGHT_BRIGHT
-#define LIGHT_BRIGHT 60
+#define LIGHT_BRIGHT 3
 #endif
 
 #if FALL_DETECTION || ALIVE_REPORTS
@@ -395,8 +395,9 @@ void pollLight() {
   if (!apdsReady) return;
   const unsigned long t = millis();
   if (t - lastLightReadAt < 2000) return;
-  lastLightReadAt = t;
+  // Unavailable readings are ignored completely: not dark, not bright, timer untouched.
   if (!APDS.colorAvailable()) return;
+  lastLightReadAt = t;
   int r = 0, g = 0, b = 0, clear = 0;
   APDS.readColor(r, g, b, clear);
 
@@ -420,12 +421,17 @@ void pollLight() {
   Serial.println(next == LightState::Dark ? "PLI lights off" : "PLI lights on");
 }
 
-int readLightClear() {
-  if (!apdsReady) return -1;
-  if (!APDS.colorAvailable()) return -1;
+// Wait up to 300 ms for a fresh APDS reading. Returns false if none arrives.
+bool readLightClear(int *outClear) {
+  if (!apdsReady || !outClear) return false;
+  const unsigned long start = millis();
+  while (!APDS.colorAvailable()) {
+    if (millis() - start >= 300) return false;
+  }
   int r = 0, g = 0, b = 0, clear = 0;
   APDS.readColor(r, g, b, clear);
-  return clear;
+  *outClear = clear;
+  return true;
 }
 #endif
 
@@ -531,7 +537,7 @@ void pollAliveReport() {
 //   PLA1 <36 hex>  authenticated ack from the node
 //   PLH            simulate a help press      PLO  simulate "I'm safe"      PLT  test frame
 //   PLX            jump to fall countdown (bench test, no drop needed)
-//   PLL            print the current ambient light level
+//   PLL            wait up to 300 ms for light, then print level or "no reading yet"
 //   PLP            run one presence check now (prints yes or no, never pixels)
 void pollSerial() {
   static char line[64];
@@ -566,9 +572,13 @@ void pollSerial() {
 #endif
 #if LIGHT_SENSING
     } else if (strcmp(line, "PLL") == 0) {
-      const int clear = readLightClear();
-      Serial.print("PLI light ");
-      Serial.println(clear);
+      int clear = 0;
+      if (readLightClear(&clear)) {
+        Serial.print("PLI light ");
+        Serial.println(clear);
+      } else {
+        Serial.println("PLI light no reading yet");
+      }
 #endif
 #if CAMERA_PRESENCE
     } else if (strcmp(line, "PLP") == 0) {
