@@ -102,10 +102,12 @@ export default function OpsRoom({
   const lastToastRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const showToast = useCallback((text: string) => {
     const now = Date.now();
-    if (lastToastRef.current.text === text && now - lastToastRef.current.at < 1500) return;
+    if (lastToastRef.current.text === text && now - lastToastRef.current.at < 2000) return;
     lastToastRef.current = { text, at: now };
     setNotice(text);
   }, []);
+  const emergencyBusyRef = useRef(false);
+  const demoResetBusyRef = useRef(false);
   const [, setTick] = useState(0);
   const cityRef = useRef<PorchlightCity | null>(null);
   const snapRef = useRef<CitySnapshot | null>(null);
@@ -369,11 +371,15 @@ export default function OpsRoom({
   };
 
   const toggleEmergency = async () => {
+    if (emergencyBusyRef.current) return;
+    emergencyBusyRef.current = true;
     try {
       await post("/api/emergency", { active: !snap?.emergencySince });
       showToast(snap?.emergencySince ? "Emergency ended" : "Emergency declared");
     } catch (err) {
       showToast((err as Error).message);
+    } finally {
+      emergencyBusyRef.current = false;
     }
   };
 
@@ -393,6 +399,8 @@ export default function OpsRoom({
   };
 
   const runDemoReset = async () => {
+    if (demoResetBusyRef.current || resetBusy) return;
+    demoResetBusyRef.current = true;
     setResetBusy(true);
     try {
       await post("/api/demo/reset", {});
@@ -402,6 +410,7 @@ export default function OpsRoom({
     } catch (err) {
       showToast((err as Error).message);
     } finally {
+      demoResetBusyRef.current = false;
       setResetBusy(false);
     }
   };
@@ -545,7 +554,7 @@ export default function OpsRoom({
             <button className="btn btn-quiet btn-small" type="button" onClick={toggleOutage}>
               {snap?.outage ? "End the outage" : "Simulate city outage"}
             </button>
-            <button className="btn btn-quiet btn-small" type="button" onClick={toggleEmergency}>
+            <button className="btn btn-quiet btn-small" type="button" onClick={() => void toggleEmergency()}>
               {snap?.emergencySince ? "End emergency" : "Declare emergency"}
             </button>
           </span>
@@ -996,7 +1005,13 @@ export default function OpsRoom({
                           <span>
                             Signed by {t.by}
                             {t.source === "beacon" && t.beacon ? ` from beacon ${t.beacon}` : ""}.{" "}
-                            {t.via ? (t.via === t.by ? `Delivered by ${t.via}.` : `Relayed to the city by ${t.via}.`) : t.by === "the city" ? "Created in this room." : "Loaded from storage."}
+                            {t.by === "the city"
+                              ? "Created in this room."
+                              : t.via
+                                ? t.via === t.by
+                                  ? `Delivered by ${t.via}.`
+                                  : `Relayed to the city by ${t.via}.`
+                                : "Loaded from storage."}
                           </span>
                           <span className="verified">Signature verified</span>
                         </span>

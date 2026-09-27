@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-27T02:32:04.907Z",
+  "generatedAt": "2026-09-27T03:13:58.397Z",
   "params": {
     "nodes": 30,
     "loss": 0.3,
@@ -35,6 +35,6 @@
       "max": 1.5
     },
     "outageCycles": 50,
-    "wallClockMs": 1021
+    "wallClockMs": 959
   }
 }

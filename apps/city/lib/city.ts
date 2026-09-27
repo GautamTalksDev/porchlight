@@ -443,7 +443,8 @@ export async function snapshot() {
       kind: e.kind,
       at: decodeHlc(e.hlc).wall,
       by: e.origin === cityId ? "the city" : nameOf.get(e.origin) ?? `node ${e.origin.slice(0, 6)}`,
-      via: c.deliveredBy.get(e.id) ?? null,
+      // City-signed actions are created here; never treat stored delivery metadata as a relay.
+      via: e.origin === cityId ? null : c.deliveredBy.get(e.id) ?? null,
       source: e.source.type,
       beacon: e.source.beacon ?? null,
       note,

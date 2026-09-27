@@ -944,8 +944,33 @@ void setup() {
 #endif
 }
 
+#if LIGHT_SENSING
+/** When a node connects, re-send the known light state once (fire-and-forget can be lost while alone). */
+void announceLightStateOnConnect() {
+  if (lightState == LightState::Unknown) return;
+  const uint8_t kind = lightState == LightState::Dark ? pl::KIND_LIGHTS_OFF : pl::KIND_LIGHTS_ON;
+  counter++;
+  uint8_t frame[pl::FRAME_LEN];
+  pl::encodeFrame(BEACON_ID, BEACON_KEY, kind, session, counter, frame);
+  transmit(frame);
+  Serial.println(lightState == LightState::Dark ? "PLI lights off (on connect)" : "PLI lights on (on connect)");
+}
+#endif
+
+void pollBleConnect() {
+  static bool wasConnected = false;
+  const bool nowConnected = BLE.connected();
+  if (nowConnected && !wasConnected) {
+#if LIGHT_SENSING
+    announceLightStateOnConnect();
+#endif
+  }
+  wasConnected = nowConnected;
+}
+
 void loop() {
   BLE.poll();
+  pollBleConnect();
   pollButton();
   pollSerial();
   pollFireAndForget();
