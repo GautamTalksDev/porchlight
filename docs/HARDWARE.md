@@ -36,12 +36,12 @@ When the matching flags are on in `config.h`, the beacon also reports quiet sign
 | Signal | Frame kind | How it is decided |
 | - | - | - |
 | Moved | 5 `moved` | Gyroscope rotation rate above `GYRO_MOVED_DPS` (default 40 dps) for at least three consecutive samples, or acceleration magnitude more than `MOVED_ACCEL_G` (default 0.35 g) from a slowly updated resting baseline for three consecutive samples. Serial reports `PLI moved (rotation)` or `PLI moved (acceleration)` |
-| Lights | 6 `lights_on` / 7 `lights_off` | Ambient clear channel from the APDS9960 crosses `LIGHT_DARK` / `LIGHT_BRIGHT` and stays there for 5 seconds. Unavailable readings are ignored and do not reset that timer |
-| Presence | 8 `presence` | Every `PRESENCE_EVERY_SEC`, when idle, one grayscale frame is reduced to an 8 by 8 grid of block averages relative to that frame's mean, then compared with the previous grid; at least 6 percent of blocks changed by more than 12 levels. Frames darker than `CAMERA_TOO_DARK` are skipped. Presence is suppressed for `CAMERA_PRESENCE_SUPPRESS_MS` after a lights transition |
+| Lights | 6 `lights_on` / 7 `lights_off` | Adaptive to the room: a slowly decaying lit level (recent maximum of valid clear readings, about 1 percent decay per minute, never below `LIGHT_BRIGHT`) sets thresholds. Dark when a reading is at or below max(`LIGHT_DARK`, 10 percent of lit level); bright when at or above max(`LIGHT_BRIGHT`, 30 percent of lit level). Must hold for 5 seconds. Unavailable readings are ignored and do not reset that timer |
+| Presence | 8 `presence` | Every `PRESENCE_EVERY_SEC` (demo 5 s), when idle, one grayscale frame is reduced to an 8 by 8 grid of block averages relative to that frame's mean, then compared with the previous grid; at least 6 percent of blocks changed by more than 12 levels. Two consecutive checks must both say yes before presence is marked; too dark breaks the chain. Frames darker than `CAMERA_TOO_DARK` are skipped. Presence is suppressed for `CAMERA_PRESENCE_SUPPRESS_MS` after a lights transition |
 
 **Privacy promise.** The camera image never leaves the chip. No pixels are printed, stored for upload, or sent over Bluetooth. Only a yes or no (a `presence` frame) goes to the node.
 
-**Honest limits.** The camera needs some light in the room; below `CAMERA_TOO_DARK` mean grayscale it reports too dark to judge and sends no presence. A whole-room brightness change (lights out or a covered lens) used to look like motion; block averages are now compared relative to each frame's mean, and presence is suppressed for 10 seconds after lights on or off. Moved used to compare acceleration to a fixed 1 g, which false-fired on desk vibration because our resting magnitude is about 0.95 g; it now prefers gyroscope handling and a slow resting accel baseline. The light sensor means the room got brighter or darker, not that the grid is powered. Demo intervals are short (`ALIVE_EVERY_SEC` 20, `PRESENCE_EVERY_SEC` 10); a real deployment would use minutes.
+**Honest limits.** The camera needs some light in the room; below `CAMERA_TOO_DARK` mean grayscale it reports too dark to judge and sends no presence. A whole-room brightness change (lights out or a covered lens) used to look like motion; block averages are now compared relative to each frame's mean, and presence is suppressed for 10 seconds after lights on or off. One-off frame changes (a hand placing a cover, a passing shadow) no longer count as a person: presence needs two consecutive yes checks. Fixed light thresholds failed across rooms (one room reads about 4 lit, another about 240; a covered sensor can read 1, which the old strict-below-1 dark test missed); lit level adapts to the room instead. Moved used to compare acceleration to a fixed 1 g, which false-fired on desk vibration because our resting magnitude is about 0.95 g; it now prefers gyroscope handling and a slow resting accel baseline. The light sensor means the room got brighter or darker, not that the grid is powered. Demo intervals are short (`ALIVE_EVERY_SEC` 20, `PRESENCE_EVERY_SEC` 5); a real deployment would use minutes.
 
 Fall detection and an unacknowledged help alert always win: presence capture does not run during a fall countdown or while help is waiting for an ack.
 
@@ -49,12 +49,12 @@ Calibration commands in the Serial Monitor:
 
 | Command | Does |
 | - | - |
-| `PLL` | Waits up to 300 ms for a fresh ambient reading, then prints `PLI light <n>`, or `PLI light no reading yet` if none arrives |
+| `PLL` | Waits up to 300 ms for a fresh ambient reading, then prints `PLI light <n> (lit level <L>, dark\|bright\|unknown)`, or `PLI light no reading yet` if none arrives |
 | `PLM` | Prints `PLI motion gyro <dps> dps accel_dev <g> g` for tuning `GYRO_MOVED_DPS` and `MOVED_ACCEL_G` |
 | `PLP` | Runs one presence check now and prints `PLI presence yes`, `PLI presence no`, or `PLI presence too dark to judge` (never pixel data) |
 | `PLC` | Prints `PLI camera ready` or `PLI camera failed` |
 
-On our board, PLL read about 4 in a lit room, about 116 with a phone flashlight, and 0 with a hand covering the sensor. Defaults are `LIGHT_DARK 1` and `LIGHT_BRIGHT 3`. Re-check with PLL in the room where you demo, since lighting varies.
+On our board, PLL has read about 4 in one lit room and about 240 in another, about 116 with a phone flashlight, and 1 with a mug covering the sensor. Floors are `LIGHT_DARK 1` and `LIGHT_BRIGHT 3`; the adaptive lit level does the rest. Re-check with PLL in the room where you demo.
 
 Libraries for signs of life: **Arduino_LSM9DS1** (motion), **Arduino_APDS9960** (light), **ArduinoBLE** (already required), and **TinyMLShield** (camera, same start path as the kit's person_detection example).
 
@@ -108,7 +108,7 @@ You can always test without the button by typing into the Serial Monitor:
 | `PLO` | Sends "I'm safe" |
 | `PLT` | Sends a test frame |
 | `PLX` | Starts the fall countdown (bench test, no drop needed) |
-| `PLL` | Waits up to 300 ms for light, then prints the level or "no reading yet" |
+| `PLL` | Waits up to 300 ms for light, then prints the reading, lit level and state |
 | `PLM` | Prints current gyro rate and acceleration deviation from rest |
 | `PLP` | Runs one presence check and prints yes, no, or too dark to judge |
 | `PLC` | Prints whether the camera started |

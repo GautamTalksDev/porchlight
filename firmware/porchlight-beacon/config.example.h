@@ -33,8 +33,8 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 #define ALIVE_REPORTS 1
 // How often to send a moved or presence frame if one was marked (demo 20 s; real deploys use minutes).
 #define ALIVE_EVERY_SEC 20
-// How often to capture a presence frame when idle (demo 10 s; real deploys use minutes).
-#define PRESENCE_EVERY_SEC 10
+// How often to capture a presence frame when idle (demo 5 s so two checks fit in about 10 s; real deploys use minutes).
+#define PRESENCE_EVERY_SEC 5
 // Mean grayscale (0 to 255) below this: too dark to judge presence; skip and keep the previous grid.
 #define CAMERA_TOO_DARK 18
 // After lights_on or lights_off, ignore presence this many ms (uniform light change looks like motion).
@@ -43,8 +43,7 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 #define GYRO_MOVED_DPS 40
 // Acceleration magnitude deviation from a slow resting baseline (g), not a fixed 1 g. Our board rests near 0.95 g.
 #define MOVED_ACCEL_G 0.35
-// Ambient clear below this is dark. Measured on our board: room about 4, flashlight about 116, covered 0.
-// Re-check with PLL in the room where you demo, since lighting varies.
+// Floor for the adaptive dark threshold: dark when reading <= max(LIGHT_DARK, 10 percent of lit level).
 #define LIGHT_DARK 1
-// Ambient clear above this is bright (hysteresis with LIGHT_DARK). Same measured values as LIGHT_DARK.
+// Floor for lit level and adaptive bright threshold: bright when reading >= max(LIGHT_BRIGHT, 30 percent of lit level).
 #define LIGHT_BRIGHT 3

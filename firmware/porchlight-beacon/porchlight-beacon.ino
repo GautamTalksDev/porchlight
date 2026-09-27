@@ -42,12 +42,14 @@
 #define ALIVE_EVERY_SEC 20
 #endif
 #ifndef PRESENCE_EVERY_SEC
-#define PRESENCE_EVERY_SEC 10
+#define PRESENCE_EVERY_SEC 5
 #endif
 #ifndef LIGHT_DARK
+// Floor for the adaptive dark threshold: dark when reading <= max(LIGHT_DARK, 10 percent of lit level).
 #define LIGHT_DARK 1
 #endif
 #ifndef LIGHT_BRIGHT
+// Floor for lit level and adaptive bright threshold: bright when reading >= max(LIGHT_BRIGHT, 30 percent of lit level).
 #define LIGHT_BRIGHT 3
 #endif
 #ifndef CAMERA_TOO_DARK
@@ -69,6 +71,8 @@
 
 #if FALL_DETECTION || ALIVE_REPORTS
 #include <Arduino_LSM9DS1.h>
+#endif
+#if FALL_DETECTION || ALIVE_REPORTS || LIGHT_SENSING
 #include <math.h>
 #endif
 
@@ -142,12 +146,14 @@ unsigned long lastAliveReportAt = 0;
 #endif
 
 #if LIGHT_SENSING
-enum class LightState { Unknown, Dark, Bright };
 bool apdsReady = false;
 LightState lightState = LightState::Unknown;
 LightState lightCandidate = LightState::Unknown;
 unsigned long lightCandidateSince = 0;
 unsigned long lastLightReadAt = 0;
+float litLevel = (float)LIGHT_BRIGHT;
+bool litLevelSeeded = false;
+unsigned long lastLitDecayAt = 0;
 #endif
 
 #if CAMERA_PRESENCE
@@ -162,6 +168,7 @@ static bool cameraFailed = false;
 static bool cameraFailPrinted = false;
 static unsigned long lastPresenceAt = 0;
 static unsigned long presenceSuppressUntil = 0;
+static bool presencePrevYes = false;
 #endif
 
 // LED (the Nano 33 BLE RGB LED is active LOW)
@@ -498,6 +505,56 @@ void pollMotionOnly() {
 #endif
 
 #if LIGHT_SENSING
+void decayLitLevel(unsigned long t) {
+  if (!litLevelSeeded) {
+    lastLitDecayAt = t;
+    return;
+  }
+  if (lastLitDecayAt == 0) {
+    lastLitDecayAt = t;
+    return;
+  }
+  const float minutes = (float)(t - lastLitDecayAt) / 60000.0f;
+  if (minutes <= 0) return;
+  litLevel *= powf(0.99f, minutes);
+  if (litLevel < (float)LIGHT_BRIGHT) litLevel = (float)LIGHT_BRIGHT;
+  lastLitDecayAt = t;
+}
+
+void observeLitLevel(int clear, unsigned long t) {
+  decayLitLevel(t);
+  if (!litLevelSeeded) {
+    litLevel = (float)clear > (float)LIGHT_BRIGHT ? (float)clear : (float)LIGHT_BRIGHT;
+    litLevelSeeded = true;
+    return;
+  }
+  if ((float)clear > litLevel) litLevel = (float)clear;
+}
+
+float darkThreshold() {
+  float th = 0.10f * litLevel;
+  if (th < (float)LIGHT_DARK) th = (float)LIGHT_DARK;
+  return th;
+}
+
+float brightThreshold() {
+  float th = 0.30f * litLevel;
+  if (th < (float)LIGHT_BRIGHT) th = (float)LIGHT_BRIGHT;
+  return th;
+}
+
+LightState classifyLight(int clear) {
+  if ((float)clear <= darkThreshold()) return LightState::Dark;
+  if ((float)clear >= brightThreshold()) return LightState::Bright;
+  return LightState::Unknown;
+}
+
+const char *lightStateWord(LightState s) {
+  if (s == LightState::Dark) return "dark";
+  if (s == LightState::Bright) return "bright";
+  return "unknown";
+}
+
 void pollLight() {
   if (!apdsReady) return;
   const unsigned long t = millis();
@@ -508,9 +565,8 @@ void pollLight() {
   int r = 0, g = 0, b = 0, clear = 0;
   APDS.readColor(r, g, b, clear);
 
-  LightState next = lightState;
-  if (clear < LIGHT_DARK) next = LightState::Dark;
-  else if (clear > LIGHT_BRIGHT) next = LightState::Bright;
+  observeLitLevel(clear, t);
+  const LightState next = classifyLight(clear);
 
   if (next == lightState || next == LightState::Unknown) {
     lightCandidate = LightState::Unknown;
@@ -542,6 +598,22 @@ bool readLightClear(int *outClear) {
   APDS.readColor(r, g, b, clear);
   *outClear = clear;
   return true;
+}
+
+void printLightNow() {
+  int clear = 0;
+  if (!readLightClear(&clear)) {
+    Serial.println("PLI light no reading yet");
+    return;
+  }
+  observeLitLevel(clear, millis());
+  Serial.print("PLI light ");
+  Serial.print(clear);
+  Serial.print(" (lit level ");
+  Serial.print((int)(litLevel + 0.5f));
+  Serial.print(", ");
+  Serial.print(lightStateWord(classifyLight(clear)));
+  Serial.println(")");
 }
 #endif
 
@@ -637,10 +709,20 @@ void pollPresence() {
   if (t - lastPresenceAt < (unsigned long)PRESENCE_EVERY_SEC * 1000UL) return;
   if (!presenceIdleOk()) return;
   lastPresenceAt = t;
-  if (runPresenceCheck() == PresenceVerdict::Yes) {
+  const PresenceVerdict v = runPresenceCheck();
+  if (v == PresenceVerdict::TooDark) {
+    presencePrevYes = false;
+    return;
+  }
+  if (v == PresenceVerdict::Yes) {
+    if (presencePrevYes) {
 #if ALIVE_REPORTS
-    presenceMarked = true;
+      presenceMarked = true;
 #endif
+    }
+    presencePrevYes = true;
+  } else {
+    presencePrevYes = false;
   }
 }
 #endif
@@ -670,7 +752,7 @@ void pollAliveReport() {
 //   PLA1 <36 hex>  authenticated ack from the node
 //   PLH            simulate a help press      PLO  simulate "I'm safe"      PLT  test frame
 //   PLX            jump to fall countdown (bench test, no drop needed)
-//   PLL            wait up to 300 ms for light, then print level or "no reading yet"
+//   PLL            wait up to 300 ms for light, then print reading, lit level and state
 //   PLM            print current gyro rate (dps) and acceleration deviation from rest (g)
 //   PLP            run one presence check now (prints yes, no, or too dark; never pixels)
 //   PLC            print camera status (ready or failed)
@@ -707,13 +789,7 @@ void pollSerial() {
 #endif
 #if LIGHT_SENSING
     } else if (strcmp(line, "PLL") == 0) {
-      int clear = 0;
-      if (readLightClear(&clear)) {
-        Serial.print("PLI light ");
-        Serial.println(clear);
-      } else {
-        Serial.println("PLI light no reading yet");
-      }
+      printLightNow();
 #endif
 #if ALIVE_REPORTS
     } else if (strcmp(line, "PLM") == 0) {
