@@ -1,7 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
-import type { EscalationTier } from "@porchlight/protocol";
 import type { CitySnapshot } from "./city";
 import { isFall } from "./fall";
 import {
@@ -13,7 +12,17 @@ import {
   TRIAGE_GEMINI_MIN_INTERVAL_MS,
 } from "./gemini";
 import { NEED_LABELS, registry } from "./registry";
-import { TriageOutput, collapseByHousehold, describeGeminiFailure, reconcile, ruleRanking, sanitizeNote, type RankedItem, type TriageCase } from "./triage-core";
+import {
+  TriageOutput,
+  collapseByHousehold,
+  describeGeminiFailure,
+  reconcile,
+  ruleRanking,
+  sanitizeNote,
+  type EscalationTier,
+  type RankedItem,
+  type TriageCase,
+} from "./triage-core";
 
 const SYSTEM = `You help emergency coordinators decide who to reach first during a city-wide power outage.
 You receive open calls for help as JSON. Each has a short reference, how long it has waited, how many

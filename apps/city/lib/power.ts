@@ -1,11 +1,27 @@
 /**
  * Household light state and power-out risk during an emergency.
- * Pure functions: same inputs, same outputs, unit tested in test/power.test.ts.
+ * Pure functions, safe for the browser: no Node built-ins and no protocol package imports
+ * (protocol pulls in node:fs via its store). Same pattern as fall.ts and journey.ts.
  */
-import type { AliveSignal } from "@porchlight/protocol";
-import { aliveTrailLabel as protocolAliveTrailLabel } from "@porchlight/protocol";
+export type AliveSignal = "motion" | "presence" | "lights_on" | "lights_off";
 
-export { protocolAliveTrailLabel as aliveTrailLabel };
+/** Trust-trail wording for an alive event. Kept here so the ops room can use it without protocol. */
+export function aliveTrailLabel(signal: AliveSignal | string | undefined | null): string {
+  switch (signal) {
+    case "motion":
+      return "Beacon: moved";
+    case "presence":
+      return "Beacon: someone seen";
+    case "lights_on":
+      return "Beacon: lights on";
+    case "lights_off":
+      return "Beacon: lights out";
+    default:
+      return "Beacon: sign of life";
+  }
+}
+
+/** Needs that fail when the home loses power. */
 export const POWER_DEPENDENT_NEEDS = [
   "oxygen-concentrator",
   "dialysis-at-home",

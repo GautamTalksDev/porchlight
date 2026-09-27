@@ -4,9 +4,12 @@
  *
  * Motion, presence and lights_on count as signs of life and clear the silent list.
  * lights_off does not: a dark porch alone is not "we heard from them".
+ *
+ * Pure and browser-safe: no Node built-ins and no protocol package imports.
  */
-import type { AliveSignal } from "@porchlight/protocol";
 import { NEED_LABELS } from "./needs";
+
+export type AliveSignal = "motion" | "presence" | "lights_on" | "lights_off";
 
 export interface SilenceHousehold {
   id: string;

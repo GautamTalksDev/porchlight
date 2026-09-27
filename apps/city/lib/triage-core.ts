@@ -2,10 +2,13 @@
  * Triage logic that does not depend on any AI service. Used as the fallback when Gemini is
  * unavailable, and as the safety net that guarantees every open call appears in the ranking.
  * Pure functions, unit tested in test/triage.test.ts.
+ * Browser-safe: no Node built-ins and no protocol package imports.
  */
 import { z } from "zod";
-import type { EscalationTier } from "@porchlight/protocol";
 import { powerOutTriageBoost } from "./power";
+
+/** Same tiers as the protocol package; defined here so this file stays client-safe. */
+export type EscalationTier = "buddies" | "street" | "city";
 
 export interface TriageCase {
   ref: string;

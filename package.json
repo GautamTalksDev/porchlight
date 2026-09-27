@@ -27,7 +27,7 @@
     "city:start": "npm run start -w @porchlight/city",
     "db:migrate": "npm run db:migrate -w @porchlight/city",
     "voice:generate": "npm run voice:generate -w @porchlight/city",
-    "check": "npm run typecheck && npm test && npm run test:firmware && npm run sim:ci"
+    "check": "npm run typecheck && npm test && npm run test:firmware && npm run sim:ci && npm run city:build"
   },
   "devDependencies": {
     "@types/node": "22.20.4",

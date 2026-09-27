@@ -100,7 +100,7 @@ Then:
 
 | Command | What it does |
 | - | - |
-| `npm run check` | Everything CI runs: typecheck, tests, firmware crypto, chaos simulation |
+| `npm run check` | Everything CI runs: typecheck, tests, firmware crypto, chaos simulation, city production build |
 | `npm test` | All unit tests. `npm test protocol` runs only matching files |
 | `npm run sim nodes=50 loss=0.4 cycles=100` | A bigger chaos run. Add `assert` to fail on any loss |
 | `npm run keygen pl-b02` | A new beacon id and key, printed for both `.env` and the firmware |
