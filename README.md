@@ -192,7 +192,7 @@ We would rather you hear these from us.
 Built at Hack the Hill III, University of Ottawa, by:
 
 - Gautam Khosla ([@GautamTalksDev](https://github.com/GautamTalksDev))
-- Pradyumna Varma
+- Pradyumna Uppalapati
 - Adam Jemmali
 - Abdel El Sayed
 
