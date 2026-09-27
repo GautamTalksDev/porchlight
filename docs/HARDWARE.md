@@ -51,6 +51,7 @@ Calibration commands in the Serial Monitor:
 | - | - |
 | `PLL` | Waits up to 300 ms for a fresh ambient reading, then prints `PLI light <n>`, or `PLI light no reading yet` if none arrives |
 | `PLP` | Runs one presence check now and prints `PLI presence yes` or `PLI presence no` (never pixel data) |
+| `PLC` | Prints `PLI camera ready` or `PLI camera failed` |
 
 On our board, PLL read about 4 in a lit room, about 116 with a phone flashlight, and 0 with a hand covering the sensor. Defaults are `LIGHT_DARK 1` and `LIGHT_BRIGHT 3`. Re-check with PLL in the room where you demo, since lighting varies.
 
@@ -108,6 +109,7 @@ You can always test without the button by typing into the Serial Monitor:
 | `PLX` | Starts the fall countdown (bench test, no drop needed) |
 | `PLL` | Waits up to 300 ms for light, then prints the level or "no reading yet" |
 | `PLP` | Runs one presence check and prints yes or no |
+| `PLC` | Prints whether the camera started |
 
 ## Connect it to a node
 

@@ -178,7 +178,11 @@ uint32_t hardwareRandom32() {
   v ^= NRF_FICR->DEVICEID[0];
 #endif
   v ^= micros();
+  // When the camera is enabled, A0/A1/A4/A5 (and D0 to D10) belong to the OV7675.
+  // Do not analogRead those pins: that steals GPIO the camera needs for XCLK/data/I2C.
+#if !CAMERA_PRESENCE
   for (int p = A0; p <= A7; p++) v = (v << 1) ^ (uint32_t)analogRead(p);
+#endif
   return v ? v : 0x5eed1234;
 }
 
@@ -437,20 +441,24 @@ bool readLightClear(int *outClear) {
 
 #if CAMERA_PRESENCE
 // Mirrors vendor GetImage: Camera.begin(QCIF, GRAYSCALE, 5, OV7675) then Camera.readFrame.
+// Must run before BLE.begin(): the SoftDevice claims PPI/timer resources the OV767X XCLK needs.
 bool ensureCamera() {
   if (cameraReady) return true;
   if (cameraFailed) return false;
-  // Lazy start, same as arduino_image_provider.cpp (not in setup: that froze on this board).
+  return false;
+}
+
+void startCameraEarly() {
+  Serial.println("PLI camera starting");
   if (!Camera.begin(QCIF, GRAYSCALE, 5, OV7675)) {
     cameraFailed = true;
-    if (!cameraFailPrinted) {
-      Serial.println("PLI camera not available, presence off");
-      cameraFailPrinted = true;
-    }
-    return false;
+    cameraFailPrinted = true;
+    Serial.println("PLI camera failed");
+    Serial.println("PLI camera not available, presence off");
+    return;
   }
   cameraReady = true;
-  return true;
+  Serial.println("PLI camera ready");
 }
 
 void averageGrid(const uint8_t *frame, uint8_t *grid) {
@@ -539,6 +547,7 @@ void pollAliveReport() {
 //   PLX            jump to fall countdown (bench test, no drop needed)
 //   PLL            wait up to 300 ms for light, then print level or "no reading yet"
 //   PLP            run one presence check now (prints yes or no, never pixels)
+//   PLC            print camera status (ready or failed)
 void pollSerial() {
   static char line[64];
   static size_t n = 0;
@@ -584,6 +593,8 @@ void pollSerial() {
     } else if (strcmp(line, "PLP") == 0) {
       const bool yes = runPresenceCheck();
       Serial.println(yes ? "PLI presence yes" : "PLI presence no");
+    } else if (strcmp(line, "PLC") == 0) {
+      Serial.println(cameraReady ? "PLI camera ready" : "PLI camera failed");
 #endif
     }
   }
@@ -652,12 +663,20 @@ void pollButton() {
 // Setup / loop
 
 void setup() {
+  // Serial first so camera start messages are visible. Do not touch LED PWM or BLE yet:
+  // the OV767X driver needs free PPI/timer resources for XCLK, and pins D0 to D10 plus A0/A1/A4/A5.
+  Serial.begin(115200);
+
+#if CAMERA_PRESENCE
+  startCameraEarly();
+#endif
+
+  // RGB LEDs: digitalWrite only (never analogWrite/PWM), so we do not steal the camera's timers.
   pinMode(LEDR, OUTPUT);
   pinMode(LEDG, OUTPUT);
   pinMode(LEDB, OUTPUT);
   rgb(false, false, false);
   setupButton();
-  Serial.begin(115200);
 
   session = hardwareRandom32();
 
@@ -698,8 +717,6 @@ void setup() {
     Serial.println("PLI light sensor not found, lights reports off");
   }
 #endif
-
-  // Camera is started lazily on first presence check (vendor pattern in arduino_image_provider.cpp).
 
   Serial.print("PLI Porchlight beacon ");
   Serial.print(BEACON_ID);
