@@ -12,6 +12,17 @@ reports/*.json
 apps/city/.data/
 next-env.d.ts
 
+# Demo video: raw footage, renders, the director's signed in browser profile and the Python env.
+video/footage/
+video/out/
+video/.profile/
+video/.venv/
+
 # Harmless safety: ignore leftover challenge data folders if they ever appear.
 cgi-data/
 *.cgi.csv
+
+# Stage autopilot
+stage/.profile/
+stage/logs/
+stage/node_modules/

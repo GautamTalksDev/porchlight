@@ -1,0 +1,14 @@
+{
+  "name": "porchlight-stage",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Stage autopilot for the live Porchlight pitch. One beacon press starts the show.",
+  "scripts": {
+    "stage": "node stage.mjs",
+    "rehearse": "node stage.mjs --rehearse"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}
