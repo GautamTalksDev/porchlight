@@ -24,6 +24,7 @@
 #include <ArduinoBLE.h>
 #include "config.h"
 #include "frame.h"
+#include "presence.h"
 
 #ifndef FALL_DETECTION
 #define FALL_DETECTION 0
@@ -503,8 +504,6 @@ uint32_t frameMean(const uint8_t *frame) {
   for (int i = 0; i < N; i += 1) sum += frame[i];
   return sum / (uint32_t)N;
 }
-
-enum class PresenceVerdict { No, Yes, TooDark };
 
 // Never prints or returns pixel data. TooDark leaves the previous grid unchanged.
 PresenceVerdict runPresenceCheck() {
