@@ -187,6 +187,15 @@ We would rather you hear these from us.
 * **The registry.** The city's list of household needs is sensitive. In a real deployment it would come from an opt-in program run by the city, and it never leaves the city server. All data in this repository is fictional.
 * **Field testing.** Everything here is proven in simulation and on a table of laptops, not yet on a real street.
 
+## Team
+
+Built at Hack the Hill III, University of Ottawa, by:
+
+- Gautam Khosla ([@GautamTalksDev](https://github.com/GautamTalksDev))
+- Pradyumna Varma
+- Adam Jemmali
+- Abdel El Sayed
+
 ## License
 
 Porchlight is open source under the [Apache License 2.0](LICENSE). The Atkinson Hyperlegible fonts are under the SIL Open Font License, included next to the font files.
