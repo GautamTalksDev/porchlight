@@ -72,7 +72,7 @@ export function ruleRanking(cases: TriageCase[]): RankedItem[] {
       if (powerBoost.reason) parts.push(powerBoost.reason);
       else if (powerDependent) parts.push("depends on power for medical equipment");
       if (c.status === "open" && c.tier !== "city") parts.push("no neighbour has responded");
-      if (c.tier !== "city") parts.push(`waiting ${c.waitMinutes} min`);
+      if (c.tier !== "city") parts.push(c.waitMinutes < 1 ? "just called" : `waiting ${c.waitMinutes} min`);
       return {
         ref: c.ref,
         priority,

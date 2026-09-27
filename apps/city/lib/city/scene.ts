@@ -32,9 +32,9 @@ export interface CityOptions {
 }
 
 const COLORS = {
-  sky: new THREE.Color("#0c0f24"),
-  ground: new THREE.Color("#141935"),
-  road: new THREE.Color("#1c2246"),
+  sky: new THREE.Color("#080b1c"),
+  ground: new THREE.Color("#10142c"),
+  road: new THREE.Color("#191e3e"),
   river: new THREE.Color("#10284a"),
   buildingA: new THREE.Color("#1e2446"),
   buildingB: new THREE.Color("#262d56"),
@@ -46,6 +46,52 @@ const COLORS = {
   windowWarm: [new THREE.Color("#ffd89c"), new THREE.Color("#ffc879"), new THREE.Color("#ffe6bf")],
   windowCool: new THREE.Color("#cfe0ff"),
 };
+
+/** A soft round glow, white in the middle and transparent at the edge: light pools and halos. */
+function radialTexture(size = 128): THREE.Texture {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.25, "rgba(255,255,255,0.55)");
+  grad.addColorStop(0.6, "rgba(255,255,255,0.14)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Bright at the bottom, gone at the top: a pillar of light rather than a laser. */
+function beamAlphaTexture(): THREE.Texture {
+  const c = document.createElement("canvas");
+  c.width = 4;
+  c.height = 256;
+  const g = c.getContext("2d")!;
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "rgba(0,0,0,1)");
+  grad.addColorStop(0.55, "rgba(70,70,70,1)");
+  grad.addColorStop(0.9, "rgba(210,210,210,1)");
+  grad.addColorStop(1, "rgba(255,255,255,1)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 256);
+  return new THREE.CanvasTexture(c);
+}
+
+/** A house roof as a gable: a triangular prism, ridge along the width. */
+function gableGeometry(width: number, depth: number, height: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(-depth / 2, 0);
+  shape.lineTo(depth / 2, 0);
+  shape.lineTo(0, height);
+  shape.lineTo(-depth / 2, 0);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: false });
+  geo.translate(0, 0, -width / 2);
+  geo.rotateY(Math.PI / 2);
+  return geo;
+}
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -79,6 +125,8 @@ interface HouseSlot {
   position: THREE.Vector3;
   door: THREE.Vector3;
   porch: THREE.Mesh;
+  /** The pool of porch light on the ground in front of the door. */
+  pool: THREE.Mesh;
   /** Front windows that fade with lights_on / lights_off. */
   windows: THREE.Mesh[];
   beam: THREE.Mesh;
@@ -117,6 +165,16 @@ export class PorchlightCity {
   private readonly streetLights: THREE.InstancedMesh;
   private readonly streetLightX: number[] = [];
   private readonly mastLight: THREE.Mesh;
+  private readonly glowTex = radialTexture();
+  private readonly beamTex = beamAlphaTexture();
+  private lampPools?: THREE.InstancedMesh;
+  /** Horizontal shift, in pixels, that keeps the subject centred between the side panels. */
+  private viewShift = 0;
+  private viewShiftTarget = 0;
+  private drift = false;
+  private driftPausedUntil = 0;
+  private slowFrames = 0;
+  private lowQuality = false;
   private readonly mastTop = new THREE.Vector3();
   /** Landmark at City Hall (building centre) for journey hops. */
   private readonly cityHallPos = new THREE.Vector3();
@@ -155,11 +213,11 @@ export class PorchlightCity {
     const h = container.clientHeight || 600;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.setSize(w, h);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.08;
     this.renderer.domElement.setAttribute("role", "img");
     this.renderer.domElement.setAttribute("aria-label", "3D view of the city at night showing which households are safe or need help");
     container.appendChild(this.renderer.domElement);
@@ -170,7 +228,7 @@ export class PorchlightCity {
     container.appendChild(this.labelRenderer.domElement);
 
     this.scene.background = this.makeSkyTexture();
-    this.scene.fog = new THREE.FogExp2(COLORS.sky, 0.0017);
+    this.scene.fog = new THREE.FogExp2(COLORS.sky, 0.0019);
 
     this.camera = new THREE.PerspectiveCamera(42, w / h, 1, 2000);
     this.camera.position.set(230, 170, 280);
@@ -186,11 +244,14 @@ export class PorchlightCity {
     this.controls.autoRotateSpeed = 0.25;
     this.controls.enabled = opts.interactive !== false;
 
-    this.hemi = new THREE.HemisphereLight("#46508a", "#0a0c1c", 0.9);
+    this.hemi = new THREE.HemisphereLight("#4a5596", "#120f1c", 0.85);
     this.scene.add(this.hemi);
-    this.moonLight = new THREE.DirectionalLight("#9fb4ff", 0.55);
-    this.moonLight.position.set(-200, 300, -150);
+    this.moonLight = new THREE.DirectionalLight("#a9bcff", 0.8);
+    this.moonLight.position.set(-220, 260, -120);
     this.scene.add(this.moonLight);
+    const streetBounce = new THREE.DirectionalLight("#ffb46a", 0.12);
+    streetBounce.position.set(120, 40, 220);
+    this.scene.add(streetBounce);
 
     const rand = mulberry32(20260926);
     const boxes: Box[] = [];
@@ -222,8 +283,10 @@ export class PorchlightCity {
     );
     windowPositions.forEach(({ m, x }, i) => {
       this.windows.setMatrixAt(i, m);
-      const lit = rand() < 0.72;
-      const base = lit ? (rand() < 0.12 ? COLORS.windowCool : COLORS.windowWarm[Math.floor(rand() * 3)]!).clone().multiplyScalar(0.9 + rand() * 0.6) : COLORS.unlit.clone().multiplyScalar(0.6);
+      const lit = rand() < 0.64;
+      const base = lit
+        ? (rand() < 0.1 ? COLORS.windowCool : COLORS.windowWarm[Math.floor(rand() * 3)]!).clone().multiplyScalar(0.55 + rand() * 0.95)
+        : COLORS.unlit.clone().multiplyScalar(0.5);
       this.windowInfo.push({ x, base });
       this.windows.setColorAt(i, base);
     });
@@ -240,6 +303,18 @@ export class PorchlightCity {
       this.streetLightX.push(p.x);
     });
     this.scene.add(this.streetLights);
+    this.lampPools = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(15, 15),
+      new THREE.MeshBasicMaterial({ map: this.glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+      lampPositions.length,
+    );
+    const flat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+    lampPositions.forEach((p, i) => {
+      this.lampPools!.setMatrixAt(i, new THREE.Matrix4().compose(new THREE.Vector3(p.x, 0.15, p.z), flat, new THREE.Vector3(1, 1, 1)));
+      this.lampPools!.setColorAt(i, new THREE.Color("#ffb877").multiplyScalar(0.32));
+    });
+    this.lampPools.renderOrder = 1;
+    this.scene.add(this.lampPools);
 
     // City Hall mast light: the uplink target.
     this.mastLight = new THREE.Mesh(new THREE.SphereGeometry(1.6, 16, 16), new THREE.MeshBasicMaterial({ color: COLORS.porch.clone().multiplyScalar(2), toneMapped: false }));
@@ -251,7 +326,7 @@ export class PorchlightCity {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.95, 0.55, 0.18);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.78, 0.42, 0.5);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
@@ -266,6 +341,11 @@ export class PorchlightCity {
         if (hit) opts.onSelect?.(hit.object.userData.householdId as string);
       });
     }
+
+    this.controls.addEventListener("start", () => {
+      this.driftPausedUntil = performance.now() + 15000;
+      this.cameraTween = undefined;
+    });
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -440,11 +520,10 @@ export class PorchlightCity {
 
   private instanceHouses(lots: { x: number; z: number; facing: number }[], rand: () => number): void {
     const body = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 5, 6), new THREE.MeshStandardMaterial({ color: COLORS.buildingB, roughness: 0.9 }), lots.length);
-    const roof = new THREE.InstancedMesh(new THREE.ConeGeometry(5.4, 3.4, 4), new THREE.MeshStandardMaterial({ color: COLORS.roof, roughness: 0.9 }), lots.length);
+    const roof = new THREE.InstancedMesh(gableGeometry(7.8, 6.8, 3.2), new THREE.MeshStandardMaterial({ color: COLORS.roof, roughness: 0.85 }), lots.length);
     lots.forEach((l, i) => {
       body.setMatrixAt(i, new THREE.Matrix4().makeTranslation(l.x, 2.5, l.z));
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
-      roof.setMatrixAt(i, new THREE.Matrix4().compose(new THREE.Vector3(l.x, 5 + 1.7, l.z), q, new THREE.Vector3(1, 1, 0.85)));
+      roof.setMatrixAt(i, new THREE.Matrix4().makeTranslation(l.x, 5, l.z));
       body.setColorAt(i, (rand() < 0.5 ? COLORS.buildingA : COLORS.buildingB).clone());
     });
     this.scene.add(body, roof);
@@ -452,13 +531,46 @@ export class PorchlightCity {
 
   private buildBoxes(boxes: Box[]): void {
     const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.1 }), boxes.length);
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0.15 }), boxes.length);
     boxes.forEach((b, i) => {
       const y = (b.y ?? 0) + b.h / 2;
       mesh.setMatrixAt(i, new THREE.Matrix4().compose(new THREE.Vector3(b.x, y, b.z), new THREE.Quaternion(), new THREE.Vector3(b.w, b.h, b.d)));
       mesh.setColorAt(i, (b.color ?? COLORS.buildingA).clone());
     });
     this.scene.add(mesh);
+
+    // Roof edges and corners catch the moon: bright at the top, fading toward the street.
+    const pos: number[] = [];
+    const col: number[] = [];
+    const top = new THREE.Color("#8c9ce0");
+    const bottom = new THREE.Color("#141a3a");
+    const push = (x: number, y: number, z: number, c: THREE.Color) => {
+      pos.push(x, y, z);
+      col.push(c.r, c.g, c.b);
+    };
+    for (const b of boxes) {
+      if (b.h < 10) continue;
+      const y0 = b.y ?? 0;
+      const y1 = y0 + b.h + 0.05;
+      const x0 = b.x - b.w / 2 - 0.03;
+      const x1 = b.x + b.w / 2 + 0.03;
+      const z0 = b.z - b.d / 2 - 0.03;
+      const z1 = b.z + b.d / 2 + 0.03;
+      const corners: [number, number][] = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+      for (let k = 0; k < 4; k++) {
+        const [ax, az] = corners[k]!;
+        const [bx, bz] = corners[(k + 1) % 4]!;
+        push(ax, y1, az, top);
+        push(bx, y1, bz, top);
+        push(ax, y1, az, top);
+        push(ax, y0, az, bottom);
+      }
+    }
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    edges.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    const lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false }));
+    this.scene.add(lines);
   }
 
   private collectWindows(b: Box, rand: () => number, out: { m: THREE.Matrix4; x: number }[]): void {
@@ -511,10 +623,8 @@ export class PorchlightCity {
       group.lookAt(cx, 0, cz);
       const body = new THREE.Mesh(new THREE.BoxGeometry(8, 5.5, 7), bodyMat);
       body.position.y = 2.75;
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(6.1, 3.8, 4), roofMat);
-      roof.rotation.y = Math.PI / 4;
-      roof.position.y = 5.5 + 1.9;
-      roof.scale.set(1, 1, 0.9);
+      const roof = new THREE.Mesh(gableGeometry(8.8, 7.8, 3.6), roofMat);
+      roof.position.y = 5.5;
       const winMat = new THREE.MeshBasicMaterial({ color: COLORS.unlit.clone(), toneMapped: false });
       const winL = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.6), winMat);
       winL.position.set(-1.6, 3.2, 3.52);
@@ -528,10 +638,27 @@ export class PorchlightCity {
       const porch = new THREE.Mesh(new THREE.SphereGeometry(0.9, 16, 16), new THREE.MeshBasicMaterial({ color: COLORS.unlit.clone(), toneMapped: false }));
       porch.position.copy(door);
       const beam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.9, 0.9, 90, 12, 1, true),
-        new THREE.MeshBasicMaterial({ color: COLORS.signal, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+        new THREE.CylinderGeometry(0.35, 2.4, 110, 24, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: COLORS.signal,
+          alphaMap: this.beamTex,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
       );
-      beam.position.set(x, 45, z);
+      beam.position.set(x, 55, z);
+      const pool = new THREE.Mesh(
+        new THREE.PlaneGeometry(18, 18),
+        new THREE.MeshBasicMaterial({ map: this.glowTex, color: COLORS.porch.clone().multiplyScalar(0.2), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+      );
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(door.x, 0.18, door.z);
+      pool.renderOrder = 2;
+      this.scene.add(pool);
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(6, 7.2, 48),
         new THREE.MeshBasicMaterial({ color: COLORS.porch, transparent: true, opacity: 0, side: THREE.DoubleSide, toneMapped: false }),
@@ -549,6 +676,7 @@ export class PorchlightCity {
         position: new THREE.Vector3(x, 6, z),
         door,
         porch,
+        pool,
         windows: [winL, winR],
         beam,
         ring,
@@ -624,27 +752,33 @@ export class PorchlightCity {
       acknowledged: "Help on the way",
       silent: "Not heard from, silent",
     };
+    const poolMat = slot.pool.material as THREE.MeshBasicMaterial;
     switch (slot.status) {
       case "ok":
         porchMat.color.copy(COLORS.porch).multiplyScalar(2.2);
+        poolMat.color.copy(COLORS.porch).multiplyScalar(0.55);
         beamMat.opacity = 0;
         break;
       case "help":
         porchMat.color.copy(COLORS.signal).multiplyScalar(2.4);
+        poolMat.color.copy(COLORS.signal).multiplyScalar(0.7);
         beamMat.color.copy(COLORS.signal);
-        beamMat.opacity = 0.32;
+        beamMat.opacity = 0.55;
         break;
       case "acknowledged":
         porchMat.color.copy(COLORS.moon).multiplyScalar(2.2);
+        poolMat.color.copy(COLORS.moon).multiplyScalar(0.45);
         beamMat.color.copy(COLORS.moon);
-        beamMat.opacity = 0.22;
+        beamMat.opacity = 0.34;
         break;
       case "silent":
         porchMat.color.copy(COLORS.windowCool).multiplyScalar(1.4);
+        poolMat.color.copy(COLORS.windowCool).multiplyScalar(0.18);
         beamMat.opacity = 0;
         break;
       default:
         porchMat.color.copy(slot.node ? COLORS.porch.clone().multiplyScalar(1.6) : COLORS.unlit);
+        poolMat.color.copy(COLORS.porch).multiplyScalar(slot.node ? 0.3 : 0.06);
         beamMat.opacity = 0;
     }
     if (slot.label) {
@@ -654,7 +788,7 @@ export class PorchlightCity {
       const st = el.querySelector(".city-label-status");
       if (st) st.textContent = text[slot.status];
       // Silent is not "unknown", so those homes already show their labels here.
-      const show = this.opts.labels === "all" || slot.status !== "unknown" || slot.node || this.selected === slot.id;
+      const show = this.opts.labels === "all" || slot.status !== "unknown" || this.selected === slot.id;
       slot.label.visible = show;
     }
   }
@@ -983,6 +1117,14 @@ export class PorchlightCity {
       this.streetLights.setColorAt(i, c);
     }
     this.streetLights.instanceColor!.needsUpdate = true;
+    if (this.lampPools) {
+      for (let i = 0; i < this.streetLightX.length; i++) {
+        const t = Math.min(1, Math.max(0, (front - this.streetLightX[i]!) / 24));
+        c.set("#ffb877").multiplyScalar(0.32 * (1 - t));
+        this.lampPools.setColorAt(i, c);
+      }
+      this.lampPools.instanceColor!.needsUpdate = true;
+    }
     for (const g of this.gridLights) {
       const t = Math.min(1, Math.max(0, (front - g.x) / 24));
       g.mat.color.copy(g.base).multiplyScalar(1 - t * 0.97);
@@ -1044,6 +1186,7 @@ export class PorchlightCity {
       }
       if (slot.status === "help") {
         const k = this.reducedMotion ? 1 : 0.6 + 0.4 * Math.sin(now / 260);
+        (slot.beam.material as THREE.MeshBasicMaterial).opacity = this.reducedMotion ? 0.55 : 0.42 + 0.18 * Math.sin(now / 520);
         (slot.porch.material as THREE.MeshBasicMaterial).color.copy(COLORS.signal).multiplyScalar(0.8 + 1.8 * k);
         const ringMat = slot.ring.material as THREE.MeshBasicMaterial;
         ringMat.color.copy(COLORS.signal);
@@ -1111,16 +1254,67 @@ export class PorchlightCity {
     if (this.cameraTween) {
       const tw = this.cameraTween;
       const k = Math.min(1, (now - tw.start) / tw.ms);
-      const e = 1 - Math.pow(1 - k, 3);
+      const e = k < 0.5 ? 16 * k ** 5 : 1 - Math.pow(-2 * k + 2, 5) / 2;
       this.camera.position.lerpVectors(tw.from, tw.to, e);
+      const travel = tw.from.distanceTo(tw.to);
+      this.camera.position.y += Math.sin(Math.PI * e) * Math.min(60, travel * 0.18);
       this.controls.target.lerpVectors(tw.tFrom, tw.tTo, e);
       if (k >= 1) this.cameraTween = undefined;
     }
+
+    this.controls.autoRotate = this.drift && !this.cameraTween && now > this.driftPausedUntil && !this.reducedMotion
+      ? true
+      : Boolean(this.opts.autoRotate) && !this.reducedMotion;
+    if (this.drift) this.controls.autoRotateSpeed = 0.06;
+
+    if (Math.abs(this.viewShift - this.viewShiftTarget) > 0.5) {
+      this.viewShift += (this.viewShiftTarget - this.viewShift) * Math.min(1, dt * 5);
+      this.applyViewShift();
+    }
+
+    if (!this.lowQuality && realDt > 0.034) {
+      this.slowFrames += 1;
+      if (this.slowFrames > 90) this.setLowQuality();
+    } else if (this.slowFrames > 0) this.slowFrames -= 1;
 
     this.controls.update();
     this.composer.render();
     this.labelRenderer.render(this.scene, this.camera);
   };
+
+  /** Keeps what the camera looks at in the middle of the free space between the side panels. */
+  setSafeArea(left: number, right: number): void {
+    this.viewShiftTarget = (left - right) / 2;
+    if (this.reducedMotion) {
+      this.viewShift = this.viewShiftTarget;
+      this.applyViewShift();
+    }
+  }
+
+  /** A very slow orbit while nobody is touching the map, so the room feels alive. Pauses on any interaction. */
+  setDrift(on: boolean): void {
+    this.drift = on;
+  }
+
+  private applyViewShift(): void {
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (!w || !h) return;
+    if (Math.abs(this.viewShift) < 0.5) this.camera.clearViewOffset();
+    else this.camera.setViewOffset(w, h, -this.viewShift, 0, w, h);
+  }
+
+  /** On a slow machine: fewer pixels and a cheaper glow, the same city. */
+  private setLowQuality(): void {
+    this.lowQuality = true;
+    this.renderer.setPixelRatio(1);
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    this.renderer.setSize(w, h);
+    this.composer.setPixelRatio?.(1);
+    this.composer.setSize(w, h);
+    this.bloom.setSize(Math.round(w / 2), Math.round(h / 2));
+  }
 
   private onVisibility = (): void => {
     if (document.hidden) cancelAnimationFrame(this.raf);
@@ -1139,7 +1333,8 @@ export class PorchlightCity {
     this.renderer.setSize(w, h);
     this.labelRenderer.setSize(w, h);
     this.composer.setSize(w, h);
-    this.bloom.setSize(w, h);
+    this.bloom.setSize(this.lowQuality ? Math.round(w / 2) : w, this.lowQuality ? Math.round(h / 2) : h);
+    this.applyViewShift();
   }
 
   dispose(): void {
@@ -1156,6 +1351,8 @@ export class PorchlightCity {
       if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
       else mat?.dispose?.();
     });
+    this.glowTex.dispose();
+    this.beamTex.dispose();
     this.composer.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

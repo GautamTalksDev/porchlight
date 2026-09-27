@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import "./styles/tokens.css";
 import "./globals.css";
+import "./styles/base.css";
 
 export const metadata: Metadata = {
   title: "Porchlight",
@@ -7,7 +9,7 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
-export const viewport: Viewport = { themeColor: "#0c0f24", colorScheme: "dark" };
+export const viewport: Viewport = { themeColor: "#0a0d1f", colorScheme: "dark" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

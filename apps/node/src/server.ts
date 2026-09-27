@@ -157,7 +157,7 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
       res.writeHead(200, { ...SECURITY_HEADERS, "content-type": MIME[".html"]!, "cache-control": "no-store" });
       return res.end(html);
     }
-    if (method === "GET" && /^\/(app\.js|styles\.css|favicon\.svg)$/.test(path)) {
+    if (method === "GET" && /^\/(app\.js|needs-guidance\.js|styles\.css|favicon\.svg)$/.test(path)) {
       return serveFile(res, join(PUBLIC_DIR, path.slice(1)));
     }
     let m = /^\/audio\/(en|fr)\/([a-z0-9-]{1,40}\.mp3)$/.exec(path);

@@ -127,8 +127,8 @@ function chapters(sim: SimReport | null): Chapter[] {
     },
     {
       kicker: "In her own language",
-      title: "An ElevenLabs agent calls her, in French.",
-      body: "It knows her address and needs, asks whether she is safe, and can mark her safe or request a responder through tools every coordinator can audit.",
+      title: "Porchlight calls her, in her own language.",
+      body: "An ElevenLabs voice agent asks, in English or French, whether she is safe. If she says she is not, the City opens a new call. Every action it takes is signed and shown to the coordinator.",
       state: (ids) =>
         base(ids, {
           blackout: 0.9,

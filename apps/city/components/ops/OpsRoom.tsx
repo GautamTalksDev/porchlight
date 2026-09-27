@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
 import CityCanvas from "@/components/city/CityCanvas";
 import { Brand } from "@/components/ui/Brand";
 import type { CityMessage, CitySnapshot } from "@/lib/city";
@@ -11,6 +12,26 @@ import { aliveTrailLabel, formatSignsOfLifeLine } from "@/lib/power";
 import { guidanceForNeeds } from "@/lib/needs-guidance";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
+import { CommandMenu, JourneyChain, Vitals, type MenuGroup } from "./OpsParts";
+import {
+  IconBolt,
+  IconCheck,
+  IconClose,
+  IconExit,
+  IconFeed,
+  IconFilm,
+  IconGauge,
+  IconInfo,
+  IconMegaphone,
+  IconPhone,
+  IconReplay,
+  IconReset,
+  IconShield,
+  IconSiren,
+  IconSound,
+  IconUplink,
+  IconWalk,
+} from "@/components/ui/Icons";
 import { useCopilot } from "./useCopilot";
 import { useVoiceCall } from "./useVoiceCall";
 import { NoticesPanel, type NoticesApi } from "./NoticesPanel";
@@ -64,6 +85,19 @@ function ago(ms: number | null): string {
   return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
 
+/** Reasons come from the model or the rules in lower case: show them as sentences. */
+function sentence(text: string): string {
+  const t = text.trim();
+  if (!t) return t;
+  const first = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(first) ? first : `${first}.`;
+}
+
+/** "just now" reads better than "0 min" on a call that has only just arrived. */
+function waited(minutes: number): string {
+  return minutes < 1 ? "just now" : `${minutes} min`;
+}
+
 const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 interface Arrival {
@@ -99,6 +133,7 @@ export default function OpsRoom({
   const [preflightChecks, setPreflightChecks] = useState<PreflightCheck[] | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const noticesApiRef = useRef<NoticesApi | null>(null);
   const lastToastRef = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const showToast = useCallback((text: string) => {
@@ -557,67 +592,129 @@ export default function OpsRoom({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <div className="ops-page">
-      <header className="shell-bar">
-        <Brand href="/" />
-        <nav className="shell-nav" aria-label="Sections">
-          <a className="btn btn-quiet btn-small" href="/ops" aria-current="page">Operations room</a>
-          <a className="btn btn-quiet btn-small" href="/present">Story mode</a>
-        </nav>
-        <div className="shell-nav">
-          <span className="link-pill" data-down={String(Boolean(snap?.outage))}>
-            <span className="dot" aria-hidden="true" />
-            <span>{snap?.outage ? "City link down: nodes are holding calls" : "City link up"}</span>
-            <button className="btn btn-quiet btn-small" type="button" onClick={toggleOutage}>
-              {snap?.outage ? "End the outage" : "Simulate city outage"}
-            </button>
-            <button className="btn btn-quiet btn-small" type="button" onClick={() => void toggleEmergency()}>
-              {snap?.emergencySince ? "End emergency" : "Declare emergency"}
-            </button>
-          </span>
-          <button
-            className="btn btn-quiet btn-small"
-            type="button"
-            aria-pressed={noticesOpen}
-            title="Notices (N)"
-            onClick={() => setNoticesOpen((o) => !o)}
-          >
-            Notices
-          </button>
-          <button
-            className="btn btn-quiet btn-small"
-            type="button"
-            aria-pressed={copilotBusy}
-            disabled={!copilot.available || voiceBusy || copilot.state === "connecting"}
-            title={!copilot.available ? "The copilot agent is not configured" : voiceBusy ? "End the resident call first" : "Talk to Porchlight (V)"}
-            onClick={() => void startCopilot()}
-          >
-            Talk to Porchlight
-          </button>
-          <button className="btn btn-quiet btn-small" type="button" aria-pressed={sound} onClick={() => setSound((s) => !s)}>
-            {sound ? "Sound on" : "Sound off"}
-          </button>
-          <span className="shell-user">{coordinator}</span>
-          {authMode === "auth0" ? <a className="btn btn-quiet btn-small" href="/auth/logout">Sign out</a> : null}
-        </div>
-      </header>
-      {authMode === "local-open" ? (
-        <p className="banner" role="status" aria-live="polite">
-          Sign-in is off because this is local development. In production this room requires Auth0.
-        </p>
-      ) : null}
-      {sessionEnded ? (
-        <p className="banner banner-warn" role="alert" aria-live="assertive">
-          Your sign-in ended. <a href="/auth/login?returnTo=/ops">Sign in again</a>
-        </p>
-      ) : !connected ? (
-        <p className="banner banner-warn" role="status" aria-live="polite">
-          Reconnecting to the city server…
-        </p>
-      ) : null}
+  const now = Date.now();
+  const silentIds = new Set((snap?.silent ?? []).map((s) => s.household));
+  const isSilent = (id: string) => silentIds.has(id) && !(snap?.households.find((h) => h.id === id)?.openIncident);
+  const statusOf = (id: string, status: string) => (isSilent(id) ? "silent" : status);
+  const STATUS_WORD: Record<string, string> = { ...STATUS_TEXT, silent: "Silent" };
+  const emergencyMinutes = snap?.emergencySince ? Math.max(0, Math.floor((now - snap.emergencySince) / 60_000)) : null;
+  const openCalls = triage?.items.length ?? 0;
+  const drawerOpen = Boolean(household);
+  const householdStatus = household ? statusOf(household.id, household.status) : "unknown";
+  const signs = household?.signsOfLife ?? null;
+  const voiceActive = voice.state !== "idle" || voice.lines.length > 0 || Boolean(voice.error);
 
-      <main className="ops-stage">
+  // Keep the home the camera looks at centred in the free space between the rail and the drawer.
+  useEffect(() => {
+    const apply = () => {
+      const city = cityRef.current;
+      if (!city) return;
+      const w = window.innerWidth;
+      if (w <= 980) {
+        city.setSafeArea(0, 0);
+        return;
+      }
+      const rail = w <= 1180 ? 320 : 356;
+      const drawer = w <= 1180 ? 360 : 412;
+      city.setSafeArea(rail + 28, drawerOpen ? drawer + 28 : 14);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, [drawerOpen, snap === null]);
+
+  const menuGroups: MenuGroup[] = [
+    {
+      id: "emergency",
+      heading: "Emergency",
+      items: [
+        {
+          id: "emergency",
+          icon: <IconSiren />,
+          tone: "porch",
+          label: snap?.emergencySince ? "End the emergency" : "Declare an emergency",
+          hint: snap?.emergencySince ? "Stops watching for silent homes" : "Starts watching for vulnerable homes that go silent",
+          onSelect: () => void toggleEmergency(),
+        },
+        {
+          id: "outage",
+          icon: <IconUplink />,
+          tone: "moon",
+          label: snap?.outage ? "Restore the city link" : "Simulate a city outage",
+          hint: snap?.outage ? "Nodes deliver everything they held" : "Nodes hold calls until the link returns",
+          onSelect: () => void toggleOutage(),
+        },
+      ],
+    },
+    {
+      id: "street",
+      heading: "The street",
+      items: [
+        {
+          id: "notices",
+          icon: <IconMegaphone />,
+          label: "Send a notice",
+          hint: "In English and French, over the mesh",
+          shortcut: "N",
+          onSelect: () => setNoticesOpen(true),
+        },
+        {
+          id: "preflight",
+          icon: <IconGauge />,
+          label: "Preflight checks",
+          hint: preflightChecks
+            ? preflightSummary.ok
+              ? "All checks passed"
+              : `${preflightSummary.passed} of ${preflightSummary.total} checks passed`
+            : "Database, Gemini, voice, sign-in and nodes",
+          shortcut: "P",
+          onSelect: () => {
+            setPreflightOpen(true);
+            void loadPreflight();
+          },
+        },
+        {
+          id: "open311",
+          icon: <IconFeed />,
+          label: "Open311 feed",
+          hint: "What the City's own systems read",
+          href: "/api/open311/v2/requests.json",
+          external: true,
+        },
+      ],
+    },
+    {
+      id: "room",
+      heading: "This room",
+      items: [
+        {
+          id: "sound",
+          icon: <IconSound on={sound} />,
+          label: sound ? "Turn the arrival chime off" : "Turn the arrival chime on",
+          onSelect: () => setSound((v) => !v),
+        },
+        { id: "story", icon: <IconFilm />, label: "Story mode", hint: "The guided tour for an audience", href: "/present" },
+        ...(demoResetEnabled
+          ? [
+              {
+                id: "reset",
+                icon: <IconReset />,
+                tone: "signal" as const,
+                label: "Reset the demo",
+                hint: "Clears every call, reply and notice",
+                shortcut: "Shift R",
+                onSelect: () => setResetConfirm(true),
+              },
+            ]
+          : []),
+        ...(authMode === "auth0" ? [{ id: "signout", icon: <IconExit />, label: "Sign out", href: "/auth/logout" }] : []),
+      ],
+    },
+  ];
+
+  return (
+    <MotionConfig reducedMotion="user">
+      <div className="ops" data-drawer={drawerOpen ? "open" : "closed"}>
         <section className="ops-city" aria-hidden="true">
           {snap ? (
             <CityCanvas
@@ -635,79 +732,627 @@ export default function OpsRoom({
                   for (const b of inc.buddies ?? []) links.push({ from: b.id, to: inc.household });
                 }
                 c.setBuddyArcs(links);
+                c.setDrift(true);
                 c.focus("ops", 0);
+                window.dispatchEvent(new Event("resize"));
               }}
             />
           ) : null}
         </section>
+        <div className="ops-scrim" aria-hidden="true" />
+        {arrival ? <div key={arrival.key} className="veil" aria-hidden="true" /> : null}
 
-        <div className="ops-hud" role="status" aria-label="Street summary">
-          <span className="hud-chip" data-kind="help"><strong>{counts.help}</strong>need help</span>
-          <span className="hud-chip" data-kind="acknowledged"><strong>{counts.acknowledged}</strong>help on the way</span>
-          <span className="hud-chip" data-kind="ok"><strong>{counts.ok}</strong>safe</span>
-          <span className="hud-chip" data-kind="unknown"><strong>{counts.unknown}</strong>not heard from</span>
-          <span className="hud-chip" data-kind="silent"><strong>{silentCount}</strong>silent</span>
-          <span className="hud-chip" data-kind="nodes"><strong>{nodesFresh}</strong>of {nodesTotal} nodes reporting</span>
+        <header className="cmd">
+          <Brand href="/" />
+          <span className="cmd-divider" aria-hidden="true" />
+          <div className="cmd-state" role="status" aria-live="polite">
+            <span className="cmd-fact">
+              <span className="lamp" data-tone={snap?.emergencySince ? "porch" : "off"} data-live={String(Boolean(snap?.emergencySince))} aria-hidden="true" />
+              {snap?.emergencySince ? (
+                <span>
+                  Emergency declared <strong>{emergencyMinutes === 0 ? "just now" : `${emergencyMinutes} min ago`}</strong>
+                </span>
+              ) : (
+                <span>No emergency declared</span>
+              )}
+            </span>
+            <span className="cmd-fact" data-tone={snap?.outage ? "down" : "up"}>
+              <span className="lamp" data-tone={snap?.outage ? "off" : "moon"} aria-hidden="true" />
+              {snap?.outage ? <span><strong>City link down.</strong> Nodes are holding calls.</span> : <span>City link up</span>}
+            </span>
+            <span className="cmd-fact">
+              <span className="lamp" data-tone={nodesFresh === nodesTotal && nodesTotal > 0 ? "porch" : "off"} aria-hidden="true" />
+              <span>
+                <strong>{nodesFresh} of {nodesTotal}</strong> nodes reporting
+              </span>
+            </span>
+          </div>
+          <span className="cmd-spacer" />
+          <div className="ledger" role="group" aria-label="The street at a glance">
+            <span className="ledger-item" data-kind="help" data-zero={String(counts.help === 0)}><b>{counts.help}</b>need help</span>
+            <span className="ledger-item" data-kind="acknowledged" data-zero={String(counts.acknowledged === 0)}><b>{counts.acknowledged}</b>on the way</span>
+            <span className="ledger-item" data-kind="silent" data-zero={String(silentCount === 0)}><b>{silentCount}</b>silent</span>
+            <span className="ledger-item" data-kind="ok" data-zero={String(counts.ok === 0)}><b>{counts.ok}</b>safe</span>
+          </div>
           <button
+            className="talk"
             type="button"
-            className="hud-chip hud-preflight"
-            data-ok={String(preflightChecks ? preflightSummary.ok : "")}
-            aria-pressed={preflightOpen}
-            title="Preflight (P)"
-            onClick={() => {
-              setPreflightOpen((o) => {
-                const next = !o;
-                if (next) void loadPreflight();
-                return next;
-              });
-            }}
+            aria-pressed={copilotBusy}
+            disabled={!copilot.available || voiceBusy || copilot.state === "connecting"}
+            title={!copilot.available ? "The copilot agent is not configured" : voiceBusy ? "End the resident call first" : "Talk to Porchlight (V)"}
+            onClick={() => void startCopilot()}
           >
-            <span className="preflight-dot" data-ok={preflightChecks ? String(preflightSummary.ok) : "unknown"} aria-hidden="true" />
-            Preflight
+            <span className="orb" data-mode={copilot.state} aria-hidden="true" />
+            Talk to Porchlight
+            <kbd>V</kbd>
           </button>
+          <CommandMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            groups={menuGroups}
+            who={authMode === "local-open" ? `${coordinator}. Sign-in is off in local development; production requires Auth0.` : coordinator}
+          />
+        </header>
+
+        {sessionEnded ? (
+          <p className="banner banner-warn" role="alert">
+            Your sign-in ended. <a href="/auth/login?returnTo=/ops">Sign in again</a>
+          </p>
+        ) : !connected ? (
+          <p className="banner banner-warn" role="status" aria-live="polite">Reconnecting to the city server…</p>
+        ) : null}
+
+        <aside className="rail lantern" aria-label="Calls and homes">
+          <div className="rail-scroll scroll-quiet">
+            <section className="rail-section" aria-labelledby="queue-h">
+              <div className="rail-head">
+                <h1 id="queue-h" className="rail-title">
+                  Who needs help first
+                  <span className="rail-count">{openCalls ? `${openCalls} open` : ""}</span>
+                </h1>
+                <p className="rail-sub" data-source={triage?.source ?? "rules"}>
+                  {triage?.source === "gemini"
+                    ? `Ranked by Gemini (${triage.model}). Suggestions only: you decide.`
+                    : triage?.note ?? "Ranked by the built-in rules."}
+                </p>
+              </div>
+              {!snap ? (
+                <div className="quiet" data-loading="true">
+                  <span className="quiet-lamp" aria-hidden="true" />
+                  <p className="quiet-title">Connecting to the city</p>
+                  <p>Loading the street, the calls and the network.</p>
+                </div>
+              ) : triage && triage.items.length ? (
+                <LayoutGroup>
+                  <ol className="tickets">
+                    <AnimatePresence initial={false}>
+                      {triage.items.map((r, i) => {
+                        const inc = snap?.incidents.find((x) => x.key === r.incident);
+                        const status = inc?.status ?? "open";
+                        const fall = isFall(inc?.note);
+                        const shownNeeds = r.needs.slice(0, 3);
+                        return (
+                          <motion.li
+                            key={r.incident}
+                            layout="position"
+                            initial={{ opacity: 0, x: -18 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -12, transition: { duration: 0.18 } }}
+                            transition={{ type: "spring", stiffness: 420, damping: 38 }}
+                          >
+                            <button
+                              type="button"
+                              className="ticket"
+                              data-new={String(fresh.has(r.incident))}
+                              data-status={status}
+                              aria-pressed={selectedId === r.household}
+                              onClick={() => choose(r.household)}
+                            >
+                              <span className="ticket-rank">{i + 1}</span>
+                              <span className="ticket-top">
+                                <span className="ticket-name">{r.label}</span>
+                                <span className="ticket-wait">{waited(r.waitMinutes)}</span>
+                              </span>
+                              <span className="ticket-reason">{sentence(r.reason)}</span>
+                              <span className="tags">
+                                {status === "acknowledged" ? <span className="tag" style={{ color: "var(--moon-hi)" }}>Help on the way</span> : null}
+                                {fall ? <span className="tag tag-fall">Possible fall</span> : null}
+                                {r.powerOut ? <span className="tag tag-power"><IconBolt />Power out</span> : null}
+                                {r.tier && TIER_CHIP[r.tier] && status === "open" ? (
+                                  <span className={TIER_CHIP[r.tier]!.className}>{TIER_CHIP[r.tier]!.text}</span>
+                                ) : null}
+                                {shownNeeds.map((n) => (
+                                  <span key={n} className="tag">{n}</span>
+                                ))}
+                                {r.needs.length > shownNeeds.length ? <span className="tag">{r.needs.length - shownNeeds.length} more</span> : null}
+                              </span>
+                              <span className="ticket-meta">
+                                {ACTION_TEXT[r.action]}. Speaks {r.lang === "fr" ? "French" : "English"}.
+                              </span>
+                            </button>
+                          </motion.li>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </ol>
+                </LayoutGroup>
+              ) : (
+                <div className="quiet">
+                  <span className="quiet-lamp" aria-hidden="true" />
+                  <p className="quiet-title">All quiet on the street</p>
+                  <p>
+                    {nodesFresh} of {nodesTotal} nodes reporting. A call appears here the moment any node reaches the city.
+                  </p>
+                </div>
+              )}
+            </section>
+
+            <section className="rail-section" aria-labelledby="silence-h">
+              <div className="rail-head">
+                <h2 id="silence-h" className="rail-title">
+                  Haven&apos;t heard from
+                  <span className="rail-count">{silentCount ? `${silentCount} silent` : ""}</span>
+                </h2>
+                <p className="rail-sub">
+                  {snap?.emergencySince
+                    ? silentCount
+                      ? "Vulnerable homes with no sign of life since the emergency began."
+                      : "Every vulnerable home has shown a sign of life, or has not been quiet long enough yet."
+                    : "Declare an emergency to watch for vulnerable homes that go quiet."}
+                </p>
+              </div>
+              {snap?.silent?.length ? (
+                <ul className="hushes">
+                  <AnimatePresence initial={false}>
+                    {snap.silent.map((s) => {
+                      const silentNeeds = (snap.households.find((h) => h.id === s.household)?.needs ?? []).map((n) => n.id);
+                      const silentGuidance = guidanceForNeeds(silentNeeds);
+                      return (
+                        <motion.li
+                          key={s.household}
+                          layout="position"
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                          className="hush"
+                        >
+                          <button type="button" className="hush-main" onClick={() => choose(s.household)}>
+                            <span className="hush-ring" aria-hidden="true" />
+                            <span className="hush-name">{s.label}</span>
+                            <span className="hush-time">{s.minutesSilent} min silent</span>
+                          </button>
+                          <span className="tags">
+                            {s.powerOut ? <span className="tag tag-power"><IconBolt />Power out</span> : null}
+                            {s.needs.slice(0, 3).map((n) => (
+                              <span key={n} className="tag">{n}</span>
+                            ))}
+                          </span>
+                          <div className="hush-actions">
+                            {silentGuidance.voiceCallSuitable ? (
+                              <>
+                                <button
+                                  className="btn btn-porch btn-small"
+                                  type="button"
+                                  onClick={() => {
+                                    choose(s.household);
+                                    void startResidentCall(s.household, null);
+                                  }}
+                                  disabled={voice.state === "connecting" || copilotBusy}
+                                >
+                                  <IconPhone />
+                                  Check in {s.lang === "fr" ? "in French" : ""}
+                                </button>
+                                <button className="btn btn-small" type="button" onClick={() => void sendSomeoneSilent(s.household, s.label, s.minutesSilent)}>
+                                  <IconWalk />
+                                  Send someone
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button className="btn btn-porch btn-small" type="button" onClick={() => void sendSomeone(s.household, s.label)}>
+                                  <IconWalk />
+                                  Send someone
+                                </button>
+                                <span className="hush-note">{silentGuidance.voiceUnsuitableNote}</span>
+                              </>
+                            )}
+                          </div>
+                        </motion.li>
+                      );
+                    })}
+                  </AnimatePresence>
+                </ul>
+              ) : null}
+            </section>
+
+            <section className="rail-section" aria-labelledby="street-h">
+              <div className="rail-head">
+                <h2 id="street-h" className="rail-title">
+                  The street
+                  <span className="rail-count">{snap ? `${snap.households.length} homes` : ""}</span>
+                </h2>
+                <p className="rail-sub">Every home on the map, in words.</p>
+              </div>
+              {!snap ? <p className="rail-sub">Loading homes…</p> : null}
+              <ul className="street" aria-label="Street homes">
+                {(snap?.households ?? []).map((h) => {
+                  const st = statusOf(h.id, h.status);
+                  const tone = st === "help" ? "signal" : st === "acknowledged" ? "moon" : st === "ok" ? "porch" : st === "silent" ? "hush" : "off";
+                  return (
+                    <li key={h.id}>
+                      <button type="button" className="street-row" aria-pressed={selectedId === h.id} onClick={() => choose(h.id)}>
+                        <span className="lamp" data-tone={tone} aria-hidden="true" />
+                        <span className="street-name">{h.label}</span>
+                        <span className="status-word" data-status={st}>{STATUS_WORD[st]}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
+          <p className="rail-foot" aria-label="Keyboard shortcuts">
+            <span><kbd>J</kbd><kbd>K</kbd> move</span>
+            <span><kbd>C</kbd> call</span>
+            <span><kbd>D</kbd> dispatch</span>
+            <span><kbd>S</kbd> safe</span>
+            <span><kbd>V</kbd> voice</span>
+            <span><kbd>Esc</kbd> close</span>
+          </p>
+        </aside>
+
+        <AnimatePresence>
+          {household ? (
+            <motion.aside
+              key="drawer"
+              className="drawer lantern"
+              aria-labelledby="detail-h"
+              initial={{ opacity: 0, x: 36 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 28, transition: { duration: 0.2 } }}
+              transition={{ type: "spring", stiffness: 360, damping: 36 }}
+            >
+              <button className="btn btn-quiet btn-icon drawer-close" type="button" aria-label="Close this home" onClick={() => choose(null)}>
+                <IconClose />
+              </button>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={household.id}
+                  className="drawer-scroll scroll-quiet"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6, transition: { duration: 0.12 } }}
+                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <div className="drawer-head">
+                    <p className="drawer-status" data-status={householdStatus}>
+                      <span
+                        className="lamp"
+                        data-tone={householdStatus === "help" ? "signal" : householdStatus === "acknowledged" ? "moon" : householdStatus === "ok" ? "porch" : householdStatus === "silent" ? "hush" : "off"}
+                        data-live={String(householdStatus === "help")}
+                        aria-hidden="true"
+                      />
+                      {STATUS_WORD[householdStatus]}
+                      {incident && isFall(incident.note) ? ", possible fall" : ""}
+                    </p>
+                    <h2 id="detail-h" className="drawer-name">{household.label}</h2>
+                    <p className="drawer-heard">
+                      {household.lastEventAt ? `Last heard ${ago(household.lastEventAt)}` : "Not heard from yet"}
+                      {incident
+                        ? `. Heard by ${incident.witnesses.length} ${incident.witnesses.length === 1 ? "node" : "nodes"}, ${incident.waitMinutes < 1 ? "called just now" : `waiting ${incident.waitMinutes} min`}.`
+                        : "."}
+                    </p>
+                    {household.needs.length || household.powerOut ? (
+                      <div className="tags">
+                        {household.powerOut ? <span className="tag tag-power"><IconBolt />Power out</span> : null}
+                        {household.needs.map((n) => (
+                          <span key={n.id} className="tag">{n.label}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="block-sub">No needs recorded.</p>
+                    )}
+                  </div>
+
+                  <Vitals signs={signs} powerOut={Boolean(household.powerOut)} now={now} />
+
+                  {ranked ? (
+                    <div className="why">
+                      <span className="why-label">{triage?.source === "gemini" ? "Why Gemini ranked this home here" : "Why this home is ranked here"}</span>
+                      <p>{sentence(ranked.reason)}</p>
+                    </div>
+                  ) : null}
+                  {incident?.note && !isFall(incident.note) ? (
+                    <div className="why">
+                      <span className="why-label">Note from the home</span>
+                      <p>{incident.note}</p>
+                    </div>
+                  ) : null}
+
+                  <div className="drawer-actions">
+                    {guidance.voiceCallSuitable ? (
+                      <button
+                        className="btn btn-porch"
+                        type="button"
+                        onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
+                        disabled={voice.state === "connecting" || copilotBusy}
+                      >
+                        <IconPhone />
+                        {voice.state === "idle" || voice.state === "error" ? `Call in ${household.lang === "fr" ? "French" : "English"}` : "Calling…"}
+                        <kbd>C</kbd>
+                      </button>
+                    ) : (
+                      <button className="btn btn-porch" type="button" onClick={() => void sendSomeone(household.id, household.label)}>
+                        <IconWalk />
+                        Send someone
+                        <kbd>C</kbd>
+                      </button>
+                    )}
+                    <button className="btn btn-moon" type="button" onClick={() => act("ack")} disabled={!incident || incident.status !== "open"}>
+                      Dispatch <kbd>D</kbd>
+                    </button>
+                    <button className="btn" type="button" onClick={() => act("ok")}>
+                      <IconCheck />
+                      Mark safe <kbd>S</kbd>
+                    </button>
+                  </div>
+                  {!guidance.voiceCallSuitable ? <p className="drawer-note">{guidance.voiceUnsuitableNote}</p> : null}
+
+                  {guidance.lines.length ? (
+                    <section className="block" aria-labelledby="bring-h">
+                      <h3 id="bring-h" className="block-title">What to bring</h3>
+                      <ul className="bring">
+                        {guidance.lines.map((line) => (
+                          <li key={line}>
+                            <IconCheck />
+                            <span>{line}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+
+                  {voiceActive ? (
+                    <section className="block" aria-labelledby="voice-h">
+                      <h3 id="voice-h" className="block-title">Voice check-in</h3>
+                      <p className="voice-state" data-live={String(["speaking", "listening", "playing"].includes(voice.state))}>
+                        <span className="lamp" data-tone={["speaking", "listening", "playing"].includes(voice.state) ? "porch" : "off"} data-live={String(voice.state === "listening")} aria-hidden="true" />
+                        {{ idle: "Call ended.", connecting: "Connecting…", speaking: "Porchlight is speaking", listening: "Listening to the resident", playing: "Playing the opening line", error: voice.error ?? "The call failed." }[voice.state]}
+                      </p>
+                      {voice.lines.length ? (
+                        <ol className="transcript scroll-quiet" aria-live="polite">
+                          {voice.lines.map((l, i) => (
+                            <li key={i} className="line" data-who={l.who}>{l.text}</li>
+                          ))}
+                        </ol>
+                      ) : null}
+                      <div className="row" style={{ display: "flex", gap: "var(--s-2)" }}>
+                        {voice.state === "error" && guidance.voiceCallSuitable ? (
+                          <button className="btn btn-porch btn-small" type="button" onClick={() => void startResidentCall(household.id, incident?.key ?? null)}>
+                            Try again
+                          </button>
+                        ) : null}
+                        {voice.state !== "idle" ? (
+                          <button className="btn btn-small" type="button" onClick={() => void voice.end()}>End call</button>
+                        ) : null}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {incident ? (
+                    <section className="block" aria-labelledby="neighbours-h">
+                      <h3 id="neighbours-h" className="block-title">Neighbours</h3>
+                      <p className="block-sub">
+                        {incident.buddies?.length ? `Buddies: ${incident.buddies.map((b) => b.label).join(" and ")}.` : "No buddies recorded for this home."}
+                      </p>
+                      {incident.neighbourThread?.length ? (
+                        <ol className="thread">
+                          {incident.neighbourThread.map((r, i) => (
+                            <li key={`${r.atMs}-${i}`}>
+                              <span className="thread-who">{r.actorLabel}</span>
+                              <span className="thread-what">{r.replyLabel}{r.note ? `: ${r.note}` : ""}</span>
+                              <span className="thread-when">{clock(r.atMs)}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="block-sub">No replies yet.</p>
+                      )}
+                    </section>
+                  ) : null}
+
+                  {showJourney ? (
+                    <section className="block" aria-labelledby="journey-h">
+                      <h3 id="journey-h" className="block-title">The call&apos;s journey</h3>
+                      <JourneyChain hops={journeyHops} />
+                      <p className="visually-hidden">{journeyCrumb}</p>
+                      <div>
+                        <button className="btn btn-quiet btn-small" type="button" onClick={() => selectedId && playJourneyFor(selectedId)}>
+                          <IconReplay />
+                          Replay on the map
+                        </button>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {trail.length ? (
+                    <section className="block" aria-labelledby="trail-h">
+                      <h3 id="trail-h" className="block-title">How this reached you</h3>
+                      <ol className="trail">
+                        {trail.map((t) => (
+                          <li key={t.id} data-kind={t.kind}>
+                            <span className="trail-time">{clock(t.at)}</span>
+                            <span className="trail-body">
+                              <strong>
+                                {t.kind === "reply"
+                                  ? `Neighbour: ${t.note ?? "reply"}`
+                                  : t.kind === "alive"
+                                    ? aliveTrailLabel(t.signal)
+                                    : t.kind === "help" && isFall(t.note ?? undefined)
+                                      ? "Possible fall"
+                                      : KIND_TEXT[t.kind] ?? t.kind}
+                              </strong>
+                              <span>
+                                Signed by {t.by}
+                                {t.source === "beacon" && t.beacon ? ` from beacon ${t.beacon}` : ""}.{" "}
+                                {t.by === "the city"
+                                  ? "Created in this room."
+                                  : t.via
+                                    ? t.via === t.by
+                                      ? `Delivered by ${t.via}.`
+                                      : `Relayed to the city by ${t.via}.`
+                                    : "Loaded from storage."}
+                              </span>
+                              <span className="verified">
+                                <IconShield />
+                                Signature verified
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  ) : null}
+                </motion.div>
+              </AnimatePresence>
+            </motion.aside>
+          ) : null}
+        </AnimatePresence>
+
+        <section className="pulse lantern" aria-label="Network health">
+          <Timeline buckets={snap?.timeline.buckets ?? []} source={snap?.timeline.source ?? "memory"} />
+          <div className="pulse-stats">
+            {snap && snap.holdSeconds.n > 0 ? (
+              <>
+                <span>
+                  <b>{snap.holdSeconds.p50} s</b>
+                  typical hold offline
+                </span>
+                <span>
+                  <b>{snap.holdSeconds.p95} s</b>
+                  slowest 5%
+                </span>
+              </>
+            ) : (
+              <span>
+                <b>Nothing held</b>
+                offline so far
+              </span>
+            )}
+            <span>
+              <b>{snap?.counts.events ?? 0}</b>
+              in {snap?.storage === "tiger-data" ? "Tiger Data" : "memory"}
+            </span>
+          </div>
+          <ul className="pulse-nodes" aria-label="Nodes">
+            {(snap?.nodes ?? []).map((n) => {
+              const freshNode = now - n.lastSeenAt < 15_000;
+              return (
+                <li key={n.id} className="node-lamp" title={`${n.name}: ${n.delivered} delivered, ${ago(n.lastSeenAt)}`}>
+                  <span className="lamp" data-tone={freshNode ? "porch" : "off"} aria-hidden="true" />
+                  <b>{n.name.replace(/^node-/, "")}</b>
+                  <span className="visually-hidden">{`${n.name}: ${n.delivered} delivered, last seen ${ago(n.lastSeenAt)}`}</span>
+                  <span aria-hidden="true">{n.delivered}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <div className="center-lane lane-top">
+          <AnimatePresence>
+            {arrival ? (
+              <motion.button
+                key={arrival.key}
+                type="button"
+                className="arrival"
+                data-fall={String(arrival.fall)}
+                onClick={() => choose(arrival.household)}
+                role="alert"
+                aria-live="assertive"
+                initial={{ opacity: 0, y: -24, scale: 0.94, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -12, scale: 0.97, transition: { duration: 0.25 } }}
+                transition={{ type: "spring", stiffness: 300, damping: 24 }}
+              >
+                <span className="arrival-beacon" aria-hidden="true" />
+                <span>
+                  <span className="arrival-kicker">{arrival.fall ? "Possible fall detected" : "New call for help"}</span>
+                  <span className="arrival-name" style={{ display: "block" }}>{arrival.label}</span>
+                </span>
+                <span className="arrival-keys">
+                  {guidanceForNeeds((snap?.households.find((h) => h.id === arrival.household)?.needs ?? []).map((n) => n.id)).voiceCallSuitable ? (
+                    <span><kbd>C</kbd> call</span>
+                  ) : (
+                    <span><kbd>C</kbd> send someone</span>
+                  )}
+                  <span><kbd>D</kbd> dispatch a neighbour</span>
+                </span>
+              </motion.button>
+            ) : null}
+          </AnimatePresence>
         </div>
 
-        {preflightOpen ? (
-          <div className="preflight-popover" role="dialog" aria-label="Preflight checks">
-            <div className="preflight-head">
-              <h2 className="section-title">Preflight</h2>
-              <button className="btn btn-quiet btn-small" type="button" onClick={() => setPreflightOpen(false)}>
-                Close
-              </button>
-            </div>
-            {preflightLoading && !preflightChecks ? (
-              <p className="section-sub">Checking…</p>
-            ) : (
-              <ul className="preflight-list">
-                {(preflightChecks ?? []).map((c) => (
-                  <li key={c.name}>
-                    <span className="preflight-dot" data-ok={String(c.ok)} aria-hidden="true" />
-                    <span>
-                      <strong>{c.name}</strong>
-                      <span className="section-sub">{c.detail}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="section-sub">
-              {preflightChecks
-                ? preflightSummary.ok
-                  ? "All checks passed."
-                  : `${preflightSummary.passed} of ${preflightSummary.total} checks passed.`
-                : null}
-            </p>
-            <p className="section-sub">
-              Open311 feed{" "}
-              <a href="/api/open311/v2/requests.json" target="_blank" rel="noopener noreferrer">
-                /api/open311/v2/requests.json
-              </a>
-            </p>
-            <button className="btn btn-quiet btn-small" type="button" onClick={() => void loadPreflight()} disabled={preflightLoading}>
-              Check again
-            </button>
-          </div>
-        ) : null}
+        <div className="center-lane lane-bottom" style={{ flexDirection: "column", alignItems: "center", gap: "var(--s-3)" }}>
+          <AnimatePresence>
+            {copilotOpen ? (
+              <motion.div
+                key="capsule"
+                className="capsule lantern"
+                role="dialog"
+                aria-label="Hey Porchlight"
+                initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.97, transition: { duration: 0.18 } }}
+                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+              >
+                <span className="orb orb-lg" data-mode={copilot.state} aria-hidden="true" />
+                <div className="capsule-body">
+                  <p className="capsule-title">Hey Porchlight</p>
+                  <p className="capsule-state" data-mode={copilot.state}>
+                    {{
+                      idle: "Ready",
+                      connecting: "Connecting…",
+                      speaking: "Speaking",
+                      listening: "Listening",
+                      error: copilot.error ?? "Something went wrong",
+                    }[copilot.state]}
+                  </p>
+                  {copilot.lines.length ? (
+                    <ol className="transcript scroll-quiet" aria-live="polite">
+                      {copilot.lines.slice(-4).map((l, i) => (
+                        <li key={i} className="line" data-who={l.who}>{l.text}</li>
+                      ))}
+                    </ol>
+                  ) : copilot.state !== "error" ? (
+                    <p className="capsule-hint">Try &ldquo;who needs help first&rdquo; or &ldquo;show me Maple Crescent&rdquo;.</p>
+                  ) : null}
+                  {copilot.state === "error" ? (
+                    <div className="capsule-actions">
+                      <button className="btn btn-porch btn-small" type="button" onClick={() => void startCopilot()}>Try again</button>
+                    </div>
+                  ) : null}
+                </div>
+                <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>End</button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+          <AnimatePresence>
+            {notice ? (
+              <motion.p
+                key={notice}
+                className="toast"
+                initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, transition: { duration: 0.18 } }}
+                transition={{ type: "spring", stiffness: 420, damping: 32 }}
+              >
+                <IconInfo />
+                {notice}
+              </motion.p>
+            ) : null}
+          </AnimatePresence>
+        </div>
 
         <NoticesPanel
           ref={(api) => {
@@ -723,446 +1368,84 @@ export default function OpsRoom({
           }}
         />
 
-        {resetConfirm ? (
-          <div className="demo-reset-dialog" role="alertdialog" aria-labelledby="demo-reset-h" aria-modal="true">
-            <h2 id="demo-reset-h" className="section-title">Reset the demo?</h2>
-            <p>This clears every call, reply and notice.</p>
-            <div className="row">
-              <button className="btn btn-porch" type="button" onClick={() => void runDemoReset()} disabled={resetBusy}>
-                {resetBusy ? "Resetting…" : "Reset"}
-              </button>
-              <button className="btn btn-quiet" type="button" onClick={() => setResetConfirm(false)} disabled={resetBusy}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {arrival ? (
-          <button
-            type="button"
-            className="arrival"
-            onClick={() => choose(arrival.household)}
-            aria-live="assertive"
-            role="alert"
-          >
-            <span className="arrival-dot" aria-hidden="true" />
-            <span>
-              <strong>{arrival.fall ? "Possible fall detected" : "New call for help"}</strong>
-              <span>
-                {arrival.label}.{" "}
-                {guidanceForNeeds(
-                  (snap?.households.find((h) => h.id === arrival.household)?.needs ?? []).map((n) => n.id),
-                ).voiceCallSuitable
-                  ? "Press C to call, D to dispatch."
-                  : "Press C to send someone, D to dispatch."}
-              </span>
-            </span>
-          </button>
-        ) : null}
-
-        {copilotOpen ? (
-          <div className="copilot-panel glass" role="dialog" aria-label="Hey Porchlight">
-            <div className="copilot-orb" data-mode={copilot.state} aria-hidden="true" />
-            <div className="copilot-body">
-              <p className="copilot-title">Hey Porchlight</p>
-              <p className="copilot-state">
-                {{
-                  idle: "Ready",
-                  connecting: "Connecting…",
-                  speaking: "Speaking",
-                  listening: "Listening",
-                  error: copilot.error ?? "Something went wrong",
-                }[copilot.state]}
+        <AnimatePresence>
+          {preflightOpen ? (
+            <motion.div
+              key="preflight"
+              className="sheet preflight-sheet lantern"
+              role="dialog"
+              aria-label="Preflight checks"
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}
+              transition={{ type: "spring", stiffness: 460, damping: 36 }}
+            >
+              <div className="sheet-head">
+                <h2 className="sheet-title">Preflight</h2>
+                <button className="btn btn-quiet btn-icon" type="button" aria-label="Close preflight" onClick={() => setPreflightOpen(false)}>
+                  <IconClose />
+                </button>
+              </div>
+              {preflightLoading && !preflightChecks ? (
+                <p className="sheet-sub">Checking…</p>
+              ) : (
+                <ul className="checks">
+                  {(preflightChecks ?? []).map((c) => (
+                    <li key={c.name} className="check">
+                      <span className="lamp" data-tone={c.ok ? "porch" : "signal"} aria-hidden="true" />
+                      <span>
+                        <strong>{c.name}: {c.ok ? "ready" : "needs attention"}</strong>
+                        <span>{c.detail}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="sheet-sub">
+                {preflightChecks ? (preflightSummary.ok ? "All checks passed." : `${preflightSummary.passed} of ${preflightSummary.total} checks passed.`) : null}{" "}
+                The <a href="/api/open311/v2/requests.json" target="_blank" rel="noopener noreferrer">Open311 feed</a> is what the City&apos;s systems read.
               </p>
-              {copilot.state === "error" ? (
-                <div className="copilot-actions">
-                  <button className="btn btn-porch btn-small" type="button" onClick={() => void startCopilot()}>
-                    Try again
+              <div className="row">
+                <button className="btn btn-small" type="button" onClick={() => void loadPreflight()} disabled={preflightLoading}>
+                  Check again
+                </button>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {resetConfirm ? (
+            <>
+              <motion.div key="reset-scrim" className="scrim-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setResetConfirm(false)} />
+              <motion.div
+                key="reset"
+                className="sheet reset-sheet lantern"
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="demo-reset-h"
+                initial={{ opacity: 0, scale: 0.95, x: "-50%", y: "-46%" }}
+                animate={{ opacity: 1, scale: 1, x: "-50%", y: "-50%" }}
+                exit={{ opacity: 0, scale: 0.97, x: "-50%", y: "-48%", transition: { duration: 0.15 } }}
+                transition={{ type: "spring", stiffness: 420, damping: 32 }}
+              >
+                <h2 id="demo-reset-h" className="sheet-title">Reset the demo?</h2>
+                <p className="sheet-sub">This clears every call, reply and notice, on the city and on the street.</p>
+                <div className="row">
+                  <button className="btn btn-signal" type="button" onClick={() => void runDemoReset()} disabled={resetBusy} autoFocus>
+                    {resetBusy ? "Resetting…" : "Reset the demo"}
                   </button>
-                  <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>
-                    End
+                  <button className="btn btn-quiet" type="button" onClick={() => setResetConfirm(false)} disabled={resetBusy}>
+                    Keep everything
                   </button>
                 </div>
-              ) : null}
-              {copilot.lines.length ? (
-                <ol className="transcript copilot-transcript" aria-live="polite">
-                  {copilot.lines.map((l, i) => (
-                    <li key={i} className="line" data-who={l.who}>{l.text}</li>
-                  ))}
-                </ol>
-              ) : copilot.state !== "error" ? (
-                <p className="section-sub">Say what you need. Try “who needs help” or “show Maple”.</p>
-              ) : null}
-            </div>
-            {copilot.state !== "error" ? (
-              <button className="btn btn-quiet btn-small" type="button" onClick={() => void copilot.end()}>
-                End
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
-        <aside className="glass ops-left" aria-labelledby="queue-h">
-          <div>
-            <h1 id="queue-h" className="section-title">Who needs help first</h1>
-            <p className="triage-source">
-              {triage?.source === "gemini" ? `Ranked by Gemini (${triage.model}). Suggestions only: you decide.` : triage?.note ?? "Ranked by the built-in rules."}
-            </p>
-          </div>
-          {triage && triage.items.length ? (
-            <ol className="queue-list">
-              {triage.items.map((r) => (
-                <li key={r.incident}>
-                  <button
-                    type="button"
-                    className="call"
-                    data-new={String(fresh.has(r.incident))}
-                    data-status={snap?.incidents.find((i) => i.key === r.incident)?.status ?? "open"}
-                    aria-pressed={selectedId === r.household}
-                    onClick={() => choose(r.household)}
-                  >
-                    <span className="call-top">
-                      <span className="call-name">{r.label}</span>
-                      <span className="call-rank">Priority {r.priority}</span>
-                    </span>
-                    <span className="call-reason">{r.reason}</span>
-                    <span className="tags">
-                      {r.tier && TIER_CHIP[r.tier] ? (
-                        <span className={TIER_CHIP[r.tier]!.className}>{TIER_CHIP[r.tier]!.text}</span>
-                      ) : null}
-                      {isFall(snap?.incidents.find((i) => i.key === r.incident)?.note) ? (
-                        <span className="tag tag-fall">Possible fall</span>
-                      ) : null}
-                      {r.powerOut ? <span className="tag tag-power">Power out</span> : null}
-                      {r.needs.map((n) => (
-                        <span key={n} className={`tag ${/power/.test(n) ? "tag-power" : ""}`}>{n}</span>
-                      ))}
-                    </span>
-                    <span className="call-meta">{ACTION_TEXT[r.action]}. Waiting {r.waitMinutes} min. Speaks {r.lang === "fr" ? "French" : "English"}.</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <div className="quiet">
-              <span className="quiet-light" aria-hidden="true" />
-              <p className="quiet-title">All quiet on the street</p>
-              <p className="section-sub">
-                {counts.ok + counts.unknown} homes, no open calls. {nodesFresh} of {nodesTotal} nodes reporting. A call appears here the moment any node reaches the city.
-              </p>
-            </div>
-          )}
-
-          <section className="silence-panel" aria-labelledby="silence-h">
-            <h2 id="silence-h" className="section-title">Haven't heard from</h2>
-            {snap?.emergencySince ? (
-              <p className="section-sub">Vulnerable homes with no sign of life since the emergency was declared.</p>
-            ) : (
-              <p className="section-sub">Declare an emergency to watch for homes that go quiet.</p>
-            )}
-            {snap?.silent?.length ? (
-              <ul className="silence-list">
-                {snap.silent.map((s) => {
-                  const silentNeeds =
-                    (snap.households.find((h) => h.id === s.household)?.needs ?? []).map((n) => n.id);
-                  const silentGuidance = guidanceForNeeds(silentNeeds);
-                  return (
-                  <li key={s.household}>
-                    <button type="button" className="silence-card" onClick={() => choose(s.household)}>
-                      <span className="call-name">{s.label}</span>
-                      <span className="call-meta">Silent for {s.minutesSilent} min. Speaks {s.lang === "fr" ? "French" : "English"}.</span>
-                      <span className="tags">
-                        {s.powerOut ? <span className="tag tag-power">Power out</span> : null}
-                        {s.needs.map((n) => (
-                          <span key={n} className={`tag ${/power/.test(n) ? "tag-power" : ""}`}>{n}</span>
-                        ))}
-                      </span>
-                    </button>
-                    <div className="row">
-                      {silentGuidance.voiceCallSuitable ? (
-                        <button
-                          className="btn btn-porch btn-small"
-                          type="button"
-                          onClick={() => {
-                            choose(s.household);
-                            void startResidentCall(s.household, null);
-                          }}
-                          disabled={voice.state === "connecting" || copilotBusy}
-                        >
-                          Check in
-                        </button>
-                      ) : (
-                        <button
-                          className="btn btn-porch btn-small"
-                          type="button"
-                          onClick={() => void sendSomeone(s.household, s.label)}
-                        >
-                          Send someone
-                        </button>
-                      )}
-                      {silentGuidance.voiceCallSuitable ? (
-                        <button
-                          className="btn btn-small"
-                          type="button"
-                          onClick={() => void sendSomeoneSilent(s.household, s.label, s.minutesSilent)}
-                        >
-                          Send someone
-                        </button>
-                      ) : (
-                        <p className="section-sub">{silentGuidance.voiceUnsuitableNote}</p>
-                      )}
-                    </div>
-                  </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="section-sub">
-                {snap?.emergencySince
-                  ? "Every vulnerable home has checked in, or has not been silent long enough yet."
-                  : "No silent homes to show."}
-              </p>
-            )}
-          </section>
-
-          <p className="keys">
-            <kbd>J</kbd> <kbd>K</kbd> move <kbd>C</kbd> call <kbd>V</kbd> Porchlight <kbd>D</kbd> dispatch <kbd>S</kbd> safe <kbd>Esc</kbd> clear
-          </p>
-        </aside>
-
-        <aside className="glass ops-right" aria-labelledby="detail-h">
-          {household ? (
-            <>
-              <div className="detail-head">
-                <h2 id="detail-h">{household.label}</h2>
-                <p>
-                  <span className="status-word" data-status={household.status}>{STATUS_TEXT[household.status]}</span>
-                  {household.lastEventAt ? `, last heard ${ago(household.lastEventAt)}` : null}
-                </p>
-                {household.needs.length || household.powerOut || (incident && isFall(incident.note)) ? (
-                  <div className="tags">
-                    {incident && isFall(incident.note) ? <span className="tag tag-fall">Possible fall</span> : null}
-                    {household.powerOut ? <span className="tag tag-power">Power out</span> : null}
-                    {household.needs.map((n) => (
-                      <span key={n.id} className={`tag ${/power/.test(n.label) ? "tag-power" : ""}`}>{n.label}</span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="section-sub">No needs recorded.</p>
-                )}
-                {formatSignsOfLifeLine(household.signsOfLife ?? undefined, Date.now()) ? (
-                  <p className="section-sub">
-                    Signs of life: {formatSignsOfLifeLine(household.signsOfLife ?? undefined, Date.now())}
-                  </p>
-                ) : null}
-                {incident ? (
-                  <p className="section-sub">
-                    Heard by {incident.witnesses.length} {incident.witnesses.length === 1 ? "node" : "nodes"}, waiting {incident.waitMinutes} min.
-                    {incident.note ? ` Note from the home: “${incident.note}”` : ""}
-                  </p>
-                ) : null}
-                {ranked ? <p>{ranked.reason}</p> : null}
-              </div>
-              <div className="actions">
-                {guidance.voiceCallSuitable ? (
-                  <button
-                    className="btn btn-porch"
-                    type="button"
-                    onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
-                    disabled={voice.state === "connecting" || copilotBusy}
-                  >
-                    {voice.state === "idle" || voice.state === "error"
-                      ? `Call in ${household.lang === "fr" ? "French" : "English"}`
-                      : "Calling…"}
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn-porch"
-                    type="button"
-                    onClick={() => void sendSomeone(household.id, household.label)}
-                  >
-                    Send someone
-                  </button>
-                )}
-                <button className="btn btn-moon" type="button" onClick={() => act("ack")} disabled={!incident || incident.status !== "open"}>Dispatch a neighbour</button>
-                <button className="btn btn-quiet" type="button" onClick={() => act("ok")}>Mark safe</button>
-              </div>
-              {!guidance.voiceCallSuitable ? (
-                <p className="section-sub">{guidance.voiceUnsuitableNote}</p>
-              ) : null}
-              {guidance.lines.length ? (
-                <section className="what-to-bring" aria-labelledby="bring-h">
-                  <h3 id="bring-h" className="section-title">What to bring</h3>
-                  <ul className="what-to-bring-list">
-                    {guidance.lines.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-              {incident ? (
-                <section className="neighbours" aria-labelledby="neighbours-h">
-                  <h3 id="neighbours-h" className="section-title">Neighbours</h3>
-                  {incident.buddies?.length ? (
-                    <p className="section-sub">
-                      Buddies: {incident.buddies.map((b) => b.label).join(", ")}
-                    </p>
-                  ) : (
-                    <p className="section-sub">No buddies recorded for this home.</p>
-                  )}
-                  {incident.neighbourThread?.length ? (
-                    <ol className="neighbour-thread">
-                      {incident.neighbourThread.map((r, i) => (
-                        <li key={`${r.atMs}-${i}`}>
-                          <span className="call-name">{r.actorLabel}</span>
-                          <span className="call-meta">
-                            {r.replyLabel}
-                            {r.note ? ` · ${r.note}` : ""}
-                            {" · "}
-                            {clock(r.atMs)}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : (
-                    <p className="section-sub">No replies yet</p>
-                  )}
-                </section>
-              ) : null}
-              <section className="voice" aria-labelledby="voice-h">
-                <h3 id="voice-h" className="section-title">Voice check-in</h3>
-                <p className="voice-state" data-live={String(["speaking", "listening", "playing"].includes(voice.state))}>
-                  {{ idle: "No call in progress.", connecting: "Connecting…", speaking: "Agent is speaking", listening: "Listening to the resident", playing: "Playing the opening line", error: voice.error ?? "The call failed." }[voice.state]}
-                </p>
-                {voice.state === "error" && guidance.voiceCallSuitable ? (
-                  <div className="copilot-actions">
-                    <button
-                      className="btn btn-porch btn-small"
-                      type="button"
-                      onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
-                    >
-                      Try again
-                    </button>
-                    <button className="btn btn-quiet btn-small" type="button" onClick={() => void voice.end()}>
-                      End call
-                    </button>
-                  </div>
-                ) : null}
-                {voice.error && voice.state !== "error" ? <p className="section-sub">{voice.error}</p> : null}
-                {voice.lines.length ? (
-                  <ol className="transcript" aria-live="polite">
-                    {voice.lines.map((l, i) => (
-                      <li key={i} className="line" data-who={l.who}>{l.text}</li>
-                    ))}
-                  </ol>
-                ) : null}
-                {voice.state !== "idle" && voice.state !== "error" ? <button className="btn btn-quiet btn-small" type="button" onClick={voice.end}>End call</button> : null}
-              </section>
-              {showJourney ? (
-                <section className="journey-panel" aria-labelledby="journey-h">
-                  <h3 id="journey-h" className="section-title">The call's journey</h3>
-                  <p className="journey-crumb">{journeyCrumb}</p>
-                  <button
-                    className="btn btn-quiet btn-small"
-                    type="button"
-                    onClick={() => selectedId && playJourneyFor(selectedId)}
-                  >
-                    Replay how this reached us
-                  </button>
-                </section>
-              ) : null}
-              {trail.length ? (
-                <section className="trail" aria-labelledby="trail-h">
-                  <h3 id="trail-h" className="section-title">How this reached you</h3>
-                  <ol>
-                    {trail.map((t) => (
-                      <li key={t.id} data-kind={t.kind}>
-                        <span className="trail-time mono">{clock(t.at)}</span>
-                        <span className="trail-body">
-                          <strong>
-                            {t.kind === "reply"
-                              ? `Neighbour: ${t.note ?? "reply"}`
-                              : t.kind === "alive"
-                                ? aliveTrailLabel(t.signal)
-                              : t.kind === "help" && isFall(t.note ?? undefined)
-                                ? "Possible fall"
-                                : KIND_TEXT[t.kind] ?? t.kind}
-                          </strong>
-                          <span>
-                            Signed by {t.by}
-                            {t.source === "beacon" && t.beacon ? ` from beacon ${t.beacon}` : ""}.{" "}
-                            {t.by === "the city"
-                              ? "Created in this room."
-                              : t.via
-                                ? t.via === t.by
-                                  ? `Delivered by ${t.via}.`
-                                  : `Relayed to the city by ${t.via}.`
-                                : "Loaded from storage."}
-                          </span>
-                          <span className="verified">Signature verified</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
-              ) : null}
+              </motion.div>
             </>
-          ) : (
-              <section aria-labelledby="detail-h">
-              <h2 id="detail-h" className="section-title">The street right now</h2>
-              <p className="section-sub">Select a home to see who lives there, what they need, and how their calls reached you. This list is the accessible equivalent of the 3D city map.</p>
-              <ul className="street" aria-label="Street homes">
-                {(snap?.households ?? []).map((h) => (
-                  <li key={h.id}>
-                    <button type="button" className="street-row" onClick={() => choose(h.id)}>
-                      <span className="street-dot" data-status={h.status} aria-hidden="true" />
-                      <span className="street-name">{h.label}</span>
-                      <span className="status-word" data-status={h.status}>{STATUS_TEXT[h.status]}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </aside>
+          ) : null}
+        </AnimatePresence>
 
-        <section className="glass ops-dock" aria-label="Network health">
-          <Timeline buckets={snap?.timeline.buckets ?? []} source={snap?.timeline.source ?? "memory"} />
-          <div>
-            <p className="section-title">Held offline</p>
-            {snap && snap.holdSeconds.n > 0 ? (
-              <dl className="kv">
-                <dt>Typical wait</dt>
-                <dd>{snap.holdSeconds.p50} s</dd>
-                <dt>Slowest 5%</dt>
-                <dd>{snap.holdSeconds.p95} s</dd>
-                <dt>Stored</dt>
-                <dd>{snap.counts.events} in {snap.storage === "tiger-data" ? "Tiger Data" : "memory"}</dd>
-              </dl>
-            ) : (
-              <p className="section-sub">Nothing held yet. During an outage, this shows how long calls waited on the street before reaching you.</p>
-            )}
-          </div>
-          <div>
-            <p className="section-title">Nodes</p>
-            <ul>
-              {(snap?.nodes ?? []).length ? (
-                snap!.nodes.map((n) => (
-                  <li key={n.id} className="node-row" data-fresh={String(Date.now() - n.lastSeenAt < 15_000)}>
-                    <span>{n.name}</span>
-                    <span>{n.delivered} delivered, {ago(n.lastSeenAt)}</span>
-                  </li>
-                ))
-              ) : (
-                <li className="section-sub">No node has reached the city yet.</li>
-              )}
-            </ul>
-          </div>
-        </section>
-      </main>
-      <div role="status" aria-live="polite" className="visually-hidden">{notice}</div>
-      {notice ? <p className="toast">{notice}</p> : null}
-    </div>
+        <div role="status" aria-live="polite" className="visually-hidden">{notice}</div>
+      </div>
+    </MotionConfig>
   );
 }

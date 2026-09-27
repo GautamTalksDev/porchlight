@@ -4,7 +4,7 @@ Porchlight is an offline-first emergency network: Arduino beacons, laptop nodes 
 
 ## Hard rules
 
-1. House style: no double hyphens and no em dashes or en dashes anywhere, including code, comments, CSS, docs and commit messages. Write i -= 1, not the decrement operator. CSS uses literal values, not custom properties. Mermaid diagrams use ==> and ->> arrows. Markdown table separator rows use | - |. The only exception is apps/city/public/fonts/OFL.txt, a license that must stay verbatim.
+1. House style: no double hyphens and no em dashes or en dashes in anything people read: interface copy, docs, comments and commit messages. Write i -= 1, not the decrement operator. Code may use a double hyphen only where the language requires it: CSS custom properties and @property rules for the Lamplight design system are allowed in apps/city/app/styles and apps/node/public/styles.css. Mermaid diagrams use ==> and ->> arrows. Markdown table separator rows use | - |. apps/city/public/fonts/OFL.txt is a license that must stay verbatim.
 2. Security stays as strict as it is: every city API route checks the coordinator session on the server (except /api/ingest, which uses the node token, and /api/health), production fails closed without Auth0, all input goes through strict zod schemas, all SQL is parameterized, secrets live only in .env.
 3. Do not add, remove or upgrade dependencies without asking first. Versions are pinned exactly.
 4. Do not edit a test to make it pass unless the behaviour change is intended, and say so explicitly.

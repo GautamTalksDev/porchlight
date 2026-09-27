@@ -1,4 +1,5 @@
 import StoryScroll from "@/components/landing/StoryScroll";
+import "./styles/story.css";
 import { publicHouseholds, simReport } from "@/lib/public-data";
 import { NEED_LABELS, registry } from "@/lib/registry";
 

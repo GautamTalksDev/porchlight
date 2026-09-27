@@ -1,0 +1,148 @@
+/* Lamplight base: shared by every page. Loaded after globals.css, so these win. */
+
+html { background: var(--night-1); color: var(--paper-1); }
+body {
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.5;
+  font-feature-settings: "kern", "liga";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+::selection { background: rgba(244, 181, 96, 0.35); color: var(--paper-1); }
+
+:focus-visible {
+  outline: 2px solid var(--porch-hi);
+  outline-offset: 3px;
+  box-shadow: none;
+  border-radius: var(--r-sm);
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Buttons. Soft rectangles, not pills: they are instruments, and the corner radius
+   steps down with size. The primary action is lit from inside. */
+.btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2);
+  min-height: 44px; padding: 0 var(--s-5);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-2);
+  background: var(--surface-raised);
+  color: var(--paper-1);
+  font: inherit; font-size: var(--fs-md); font-weight: 650; letter-spacing: 0.005em;
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+  box-shadow: var(--edge-light);
+  transition:
+    background var(--t-fast) ease,
+    border-color var(--t-fast) ease,
+    box-shadow var(--t-mid) var(--ease-out),
+    transform var(--t-fast) var(--ease-out),
+    filter var(--t-fast) ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:hover { border-color: var(--line-3); background: rgba(34, 40, 73, 0.85); }
+.btn:active { transform: translateY(1px) scale(0.985); }
+.btn:disabled { opacity: 0.42; cursor: not-allowed; transform: none; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn kbd { margin-left: var(--s-1); }
+
+.btn-quiet { background: transparent; box-shadow: none; border-color: var(--line-2); }
+.btn-quiet:hover { background: rgba(241, 235, 223, 0.05); }
+
+.btn-porch {
+  background: linear-gradient(180deg, var(--porch-hi) 0%, var(--porch) 58%, #e39f47 100%);
+  border-color: rgba(255, 213, 150, 0.9);
+  color: var(--porch-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 6px 22px -8px var(--porch-glow);
+}
+.btn-porch:hover { background: linear-gradient(180deg, #ffe0ad 0%, #f8c070 58%, #e8a64f 100%); border-color: var(--porch-hi); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 10px 32px -8px var(--porch-glow); }
+.btn-porch kbd { background: rgba(42, 26, 5, 0.12); border-color: rgba(42, 26, 5, 0.25); color: var(--porch-ink); }
+
+.btn-signal {
+  background: linear-gradient(180deg, var(--signal-hi) 0%, var(--signal) 60%, #e9533f 100%);
+  border-color: rgba(255, 157, 140, 0.9);
+  color: var(--signal-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 6px 22px -8px var(--signal-glow);
+}
+
+.btn-moon { background: var(--moon-wash); border-color: rgba(158, 197, 255, 0.45); color: var(--moon-hi); box-shadow: none; }
+.btn-moon:hover { background: rgba(158, 197, 255, 0.18); border-color: var(--moon); }
+.btn-moon kbd { color: var(--moon-hi); border-color: rgba(158, 197, 255, 0.35); }
+
+.btn-small { min-height: 36px; padding: 0 var(--s-3); font-size: var(--fs-sm); border-radius: var(--r-sm); }
+.btn-icon { width: 36px; min-height: 36px; padding: 0; border-radius: var(--r-sm); }
+.btn-block { width: 100%; }
+
+kbd {
+  display: inline-grid; place-items: center;
+  min-width: 1.45em; height: 1.45em; padding: 0 0.3em;
+  font-family: var(--font); font-size: 0.72rem; font-weight: 700; line-height: 1;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-3);
+  background: rgba(241, 235, 223, 0.05);
+  color: var(--paper-2);
+}
+
+/* Chips: small, square-shouldered facts. Colour only where it carries meaning. */
+.tags { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+.tag {
+  display: inline-flex; align-items: center; gap: 0.35em;
+  font-size: var(--fs-xs); font-weight: 600; line-height: 1;
+  padding: 0.38em 0.6em; border-radius: var(--r-xs);
+  background: rgba(241, 235, 223, 0.06);
+  color: var(--paper-2);
+  border: 1px solid var(--line-1);
+}
+.tag-power { background: var(--signal-wash); color: var(--signal-hi); border-color: rgba(255, 106, 85, 0.3); }
+.tag-fall { background: rgba(196, 140, 255, 0.14); color: #dcc2ff; border-color: rgba(196, 140, 255, 0.35); }
+.tag-tier-buddies { background: var(--porch-wash); color: var(--porch-hi); border-color: rgba(244, 181, 96, 0.28); }
+.tag-tier-street { background: rgba(255, 150, 80, 0.12); color: #ffb98a; border-color: rgba(255, 150, 80, 0.3); }
+.tag-tier-city { background: var(--signal-wash); color: var(--signal-hi); border-color: rgba(255, 106, 85, 0.3); }
+
+/* Brand */
+.brand { display: inline-flex; align-items: center; gap: var(--s-2); text-decoration: none; color: var(--paper-1); border-radius: var(--r-sm); }
+.brand svg { width: 28px; height: 28px; }
+.brand-name { font-weight: 750; font-size: var(--fs-lg); letter-spacing: -0.015em; }
+
+/* House labels floating over the 3D city. */
+.city { background: var(--night-0); }
+.city-label {
+  display: grid; justify-items: center; gap: 1px;
+  padding: 5px 10px 6px; border-radius: var(--r-sm);
+  background: rgba(8, 10, 24, 0.82);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+  font-size: 11.5px; line-height: 1.2; white-space: nowrap; pointer-events: none;
+  transition: border-color var(--t-mid) ease, background var(--t-mid) ease, transform var(--t-mid) var(--ease-out);
+}
+.city-label-name { font-weight: 700; color: var(--paper-1); letter-spacing: 0.005em; }
+.city-label-status { color: var(--paper-3); font-weight: 600; }
+.city-label[data-status="ok"] .city-label-status { color: var(--porch); }
+.city-label[data-status="help"] { border-color: rgba(255, 106, 85, 0.75); box-shadow: 0 0 0 3px rgba(255, 106, 85, 0.12), 0 8px 24px -6px var(--signal-glow); }
+.city-label[data-status="help"] .city-label-status { color: var(--signal-hi); }
+.city-label[data-status="acknowledged"] { border-color: rgba(158, 197, 255, 0.55); }
+.city-label[data-status="acknowledged"] .city-label-status { color: var(--moon-hi); }
+.city-label[data-status="silent"] .city-label-status { color: var(--hush); }
+.city-label[data-selected="true"] { border-color: var(--paper-1); background: rgba(24, 29, 58, 0.95); }
+.journey-label {
+  padding: 3px 8px; border-radius: var(--r-xs);
+  background: rgba(8, 10, 24, 0.9); border: 1px solid var(--line-3);
+  color: var(--paper-1); font-size: 11px; font-weight: 650; white-space: nowrap; pointer-events: none;
+}
+
+/* Thin, quiet scrollbars. */
+.scroll-quiet { scrollbar-width: thin; scrollbar-color: rgba(241, 235, 223, 0.16) transparent; }
+.scroll-quiet::-webkit-scrollbar { width: 8px; }
+.scroll-quiet::-webkit-scrollbar-thumb { background: rgba(241, 235, 223, 0.14); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
+
+/* Shared headings used by sheets and gates. */
+.section-title { font-size: var(--fs-lg); font-weight: 750; letter-spacing: -0.01em; }
+.section-sub { color: var(--paper-3); font-size: var(--fs-sm); line-height: 1.45; }
+.row { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }

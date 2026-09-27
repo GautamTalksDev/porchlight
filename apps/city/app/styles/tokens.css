@@ -1,0 +1,113 @@
+/* Lamplight: Porchlight's design tokens.
+   Light is the interface. Every colour has one job, shared by the beacon's LED,
+   the 3D city and every panel:
+     porch   life, neighbours, the main action (a porch light that is on)
+     signal  a call for help, and nothing else
+     moon    the City, information, the uplink
+     hush    a home that has gone silent
+   Status is always written in words as well as shown in colour. */
+
+@property --pl-sweep {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: -40%;
+}
+@property --pl-spin {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Night: deep blue-black, never grey. */
+  --night-0: #04050d;
+  --night-1: #0a0d1f;
+  --night-2: #10142b;
+  --night-3: #181d3a;
+  --night-4: #222849;
+
+  /* Paper: text. Three levels, all AA or better on night-2. */
+  --paper-1: #f1ebdf;
+  --paper-2: #bfbacd;
+  --paper-3: #8f8ba7;
+
+  /* Hairlines. */
+  --line-1: rgba(241, 235, 223, 0.07);
+  --line-2: rgba(241, 235, 223, 0.13);
+  --line-3: rgba(241, 235, 223, 0.24);
+
+  /* Meaning. */
+  --porch: #f4b560;
+  --porch-hi: #ffd596;
+  --porch-ink: #2a1a05;
+  --porch-wash: rgba(244, 181, 96, 0.12);
+  --porch-glow: rgba(244, 181, 96, 0.45);
+
+  --signal: #ff6a55;
+  --signal-hi: #ff9d8c;
+  --signal-ink: #2b0a05;
+  --signal-wash: rgba(255, 106, 85, 0.13);
+  --signal-glow: rgba(255, 106, 85, 0.55);
+
+  --moon: #9ec5ff;
+  --moon-hi: #cfe1ff;
+  --moon-ink: #07142b;
+  --moon-wash: rgba(158, 197, 255, 0.11);
+  --moon-glow: rgba(158, 197, 255, 0.4);
+
+  --hush: #c6cde6;
+  --hush-wash: rgba(198, 205, 230, 0.08);
+
+  --verify: #8fdcae;
+  --verify-wash: rgba(143, 220, 174, 0.1);
+
+  /* Type: Atkinson Hyperlegible Next, designed by the Braille Institute for low vision readers.
+     Scale: a major third (1.25) from 15px. */
+  --font: "Atkinson Next", system-ui, sans-serif;
+  --font-mono: "Atkinson Mono", ui-monospace, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.171875rem;
+  --fs-xl: 1.46484375rem;
+  --fs-2xl: 1.83105469rem;
+  --fs-3xl: 2.28881836rem;
+  --fs-4xl: 2.86102295rem;
+  --fs-5xl: 3.57627869rem;
+
+  /* Space: a 4px grid. */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.25rem;
+  --s-6: 1.5rem;
+  --s-8: 2rem;
+  --s-10: 2.5rem;
+  --s-12: 3rem;
+
+  /* Radius follows hierarchy: the bigger the thing, the softer the corner. */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+
+  /* Surfaces: a lantern, not frosted glass. Dark, warm-edged, lit from the top. */
+  --surface: rgba(10, 13, 31, 0.8);
+  --surface-solid: #0c1024;
+  --surface-raised: rgba(24, 29, 58, 0.72);
+  --edge-light: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --shadow-far: 0 40px 90px -30px rgba(0, 0, 0, 0.75);
+  --shadow-near: 0 12px 30px -12px rgba(0, 0, 0, 0.6);
+
+  /* Motion. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-fast: 140ms;
+  --t-mid: 260ms;
+  --t-slow: 520ms;
+}

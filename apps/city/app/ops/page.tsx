@@ -1,4 +1,5 @@
 import OpsRoom from "@/components/ops/OpsRoom";
+import "../styles/ops.css";
 import { SignInGate } from "@/components/ui/Gate";
 import { authMode, currentCoordinator } from "@/lib/auth";
 import { publicHouseholds } from "@/lib/public-data";
