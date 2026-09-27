@@ -15,7 +15,8 @@
   comes into range later still hears it. Nodes discard the repeats as duplicates.
 
   Signs of life (optional): moved, lights on/off, and camera presence by frame difference.
-  Presence never stores or sends an image, only a yes or no.
+  Presence never stores or sends an image, only a yes or no. Uniform brightness changes
+  (lights out, covered lens) are normalised away or skipped when the frame is too dark.
 
   Library: ArduinoBLE (Library Manager). Board: Arduino Mbed OS Nano Boards > Nano 33 BLE.
   Optional: Arduino_LSM9DS1, Arduino_APDS9960, TinyMLShield when the matching flags are on.
@@ -47,6 +48,14 @@
 #endif
 #ifndef LIGHT_BRIGHT
 #define LIGHT_BRIGHT 3
+#endif
+#ifndef CAMERA_TOO_DARK
+// Mean grayscale below this (0 to 255) is too dark to judge presence.
+#define CAMERA_TOO_DARK 18
+#endif
+#ifndef CAMERA_PRESENCE_SUPPRESS_MS
+// After lights_on or lights_off, ignore presence this long (uniform light change looks like motion).
+#define CAMERA_PRESENCE_SUPPRESS_MS 10000
 #endif
 
 #if FALL_DETECTION || ALIVE_REPORTS
@@ -129,13 +138,15 @@ unsigned long lastLightReadAt = 0;
 #if CAMERA_PRESENCE
 // QCIF grayscale, same size as the vendor GetImage receive buffer (176 * 144).
 static uint8_t camFrame[176 * 144];
-static uint8_t prevGrid[64];
-static uint8_t currGrid[64];
+// Block averages relative to that frame's mean (brightness-normalised).
+static int16_t prevGrid[64];
+static int16_t currGrid[64];
 static bool havePrevGrid = false;
 static bool cameraReady = false;
 static bool cameraFailed = false;
 static bool cameraFailPrinted = false;
 static unsigned long lastPresenceAt = 0;
+static unsigned long presenceSuppressUntil = 0;
 #endif
 
 // LED (the Nano 33 BLE RGB LED is active LOW)
@@ -423,6 +434,9 @@ void pollLight() {
   lightCandidate = LightState::Unknown;
   sendFireAndForget(next == LightState::Dark ? pl::KIND_LIGHTS_OFF : pl::KIND_LIGHTS_ON);
   Serial.println(next == LightState::Dark ? "PLI lights off" : "PLI lights on");
+#if CAMERA_PRESENCE
+  presenceSuppressUntil = millis() + (unsigned long)CAMERA_PRESENCE_SUPPRESS_MS;
+#endif
 }
 
 // Wait up to 300 ms for a fresh APDS reading. Returns false if none arrives.
@@ -461,7 +475,7 @@ void startCameraEarly() {
   Serial.println("PLI camera ready");
 }
 
-void averageGrid(const uint8_t *frame, uint8_t *grid) {
+void averageGridRelative(const uint8_t *frame, uint32_t mean, int16_t *grid) {
   const int W = 176;
   const int H = 144;
   const int BW = 8;
@@ -477,20 +491,34 @@ void averageGrid(const uint8_t *frame, uint8_t *grid) {
         const uint8_t *row = frame + (y0 + y) * W + x0;
         for (int x = 0; x < blockW; x += 1) sum += row[x];
       }
-      grid[by * BW + bx] = (uint8_t)(sum / (uint32_t)(blockW * blockH));
+      const int blockAvg = (int)(sum / (uint32_t)(blockW * blockH));
+      grid[by * BW + bx] = (int16_t)(blockAvg - (int)mean);
     }
   }
 }
 
-// Returns true if presence was detected. Never prints or returns pixel data.
-bool runPresenceCheck() {
-  if (!ensureCamera()) return false;
+uint32_t frameMean(const uint8_t *frame) {
+  const int N = 176 * 144;
+  uint32_t sum = 0;
+  for (int i = 0; i < N; i += 1) sum += frame[i];
+  return sum / (uint32_t)N;
+}
+
+enum class PresenceVerdict { No, Yes, TooDark };
+
+// Never prints or returns pixel data. TooDark leaves the previous grid unchanged.
+PresenceVerdict runPresenceCheck() {
+  if (!ensureCamera()) return PresenceVerdict::No;
   Camera.readFrame(camFrame);
-  averageGrid(camFrame, currGrid);
+  const uint32_t mean = frameMean(camFrame);
+  if (mean < (uint32_t)CAMERA_TOO_DARK) {
+    return PresenceVerdict::TooDark;
+  }
+  averageGridRelative(camFrame, mean, currGrid);
   if (!havePrevGrid) {
     memcpy(prevGrid, currGrid, sizeof(prevGrid));
     havePrevGrid = true;
-    return false;
+    return PresenceVerdict::No;
   }
   int changed = 0;
   for (int i = 0; i < 64; i += 1) {
@@ -500,7 +528,7 @@ bool runPresenceCheck() {
   }
   memcpy(prevGrid, currGrid, sizeof(prevGrid));
   // At least 6 percent of 64 blocks: 4 or more.
-  return changed * 100 >= 6 * 64;
+  return changed * 100 >= 6 * 64 ? PresenceVerdict::Yes : PresenceVerdict::No;
 }
 
 bool presenceIdleOk() {
@@ -515,10 +543,11 @@ bool presenceIdleOk() {
 void pollPresence() {
   if (cameraFailed) return;
   const unsigned long t = millis();
+  if (t < presenceSuppressUntil) return;
   if (t - lastPresenceAt < (unsigned long)PRESENCE_EVERY_SEC * 1000UL) return;
   if (!presenceIdleOk()) return;
   lastPresenceAt = t;
-  if (runPresenceCheck()) {
+  if (runPresenceCheck() == PresenceVerdict::Yes) {
 #if ALIVE_REPORTS
     presenceMarked = true;
 #endif
@@ -546,7 +575,7 @@ void pollAliveReport() {
 //   PLH            simulate a help press      PLO  simulate "I'm safe"      PLT  test frame
 //   PLX            jump to fall countdown (bench test, no drop needed)
 //   PLL            wait up to 300 ms for light, then print level or "no reading yet"
-//   PLP            run one presence check now (prints yes or no, never pixels)
+//   PLP            run one presence check now (prints yes, no, or too dark; never pixels)
 //   PLC            print camera status (ready or failed)
 void pollSerial() {
   static char line[64];
@@ -591,8 +620,10 @@ void pollSerial() {
 #endif
 #if CAMERA_PRESENCE
     } else if (strcmp(line, "PLP") == 0) {
-      const bool yes = runPresenceCheck();
-      Serial.println(yes ? "PLI presence yes" : "PLI presence no");
+      const PresenceVerdict v = runPresenceCheck();
+      if (v == PresenceVerdict::Yes) Serial.println("PLI presence yes");
+      else if (v == PresenceVerdict::TooDark) Serial.println("PLI presence too dark to judge");
+      else Serial.println("PLI presence no");
     } else if (strcmp(line, "PLC") == 0) {
       Serial.println(cameraReady ? "PLI camera ready" : "PLI camera failed");
 #endif

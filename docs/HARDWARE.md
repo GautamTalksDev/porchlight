@@ -37,11 +37,11 @@ When the matching flags are on in `config.h`, the beacon also reports quiet sign
 | - | - | - |
 | Moved | 5 `moved` | Acceleration differs from 1 g by more than 0.15 g for at least three samples since the last report |
 | Lights | 6 `lights_on` / 7 `lights_off` | Ambient clear channel from the APDS9960 crosses `LIGHT_DARK` / `LIGHT_BRIGHT` and stays there for 5 seconds. Unavailable readings are ignored and do not reset that timer |
-| Presence | 8 `presence` | Every `PRESENCE_EVERY_SEC`, when idle, one grayscale frame is reduced to an 8 by 8 grid and compared with the previous grid; at least 6 percent of blocks changed by more than 12 levels |
+| Presence | 8 `presence` | Every `PRESENCE_EVERY_SEC`, when idle, one grayscale frame is reduced to an 8 by 8 grid of block averages relative to that frame's mean, then compared with the previous grid; at least 6 percent of blocks changed by more than 12 levels. Frames darker than `CAMERA_TOO_DARK` are skipped. Presence is suppressed for `CAMERA_PRESENCE_SUPPRESS_MS` after a lights transition |
 
 **Privacy promise.** The camera image never leaves the chip. No pixels are printed, stored for upload, or sent over Bluetooth. Only a yes or no (a `presence` frame) goes to the node.
 
-**Honest limits.** The camera needs some light in the room; a dark room will not show presence. The light sensor means the room got brighter or darker, not that the grid is powered. Demo intervals are short (`ALIVE_EVERY_SEC` 20, `PRESENCE_EVERY_SEC` 10); a real deployment would use minutes.
+**Honest limits.** The camera needs some light in the room; below `CAMERA_TOO_DARK` mean grayscale it reports too dark to judge and sends no presence. A whole-room brightness change (lights out or a covered lens) used to look like motion; block averages are now compared relative to each frame's mean, and presence is suppressed for 10 seconds after lights on or off. The light sensor means the room got brighter or darker, not that the grid is powered. Demo intervals are short (`ALIVE_EVERY_SEC` 20, `PRESENCE_EVERY_SEC` 10); a real deployment would use minutes.
 
 Fall detection and an unacknowledged help alert always win: presence capture does not run during a fall countdown or while help is waiting for an ack.
 
@@ -50,7 +50,7 @@ Calibration commands in the Serial Monitor:
 | Command | Does |
 | - | - |
 | `PLL` | Waits up to 300 ms for a fresh ambient reading, then prints `PLI light <n>`, or `PLI light no reading yet` if none arrives |
-| `PLP` | Runs one presence check now and prints `PLI presence yes` or `PLI presence no` (never pixel data) |
+| `PLP` | Runs one presence check now and prints `PLI presence yes`, `PLI presence no`, or `PLI presence too dark to judge` (never pixel data) |
 | `PLC` | Prints `PLI camera ready` or `PLI camera failed` |
 
 On our board, PLL read about 4 in a lit room, about 116 with a phone flashlight, and 0 with a hand covering the sensor. Defaults are `LIGHT_DARK 1` and `LIGHT_BRIGHT 3`. Re-check with PLL in the room where you demo, since lighting varies.
@@ -108,7 +108,7 @@ You can always test without the button by typing into the Serial Monitor:
 | `PLT` | Sends a test frame |
 | `PLX` | Starts the fall countdown (bench test, no drop needed) |
 | `PLL` | Waits up to 300 ms for light, then prints the level or "no reading yet" |
-| `PLP` | Runs one presence check and prints yes or no |
+| `PLP` | Runs one presence check and prints yes, no, or too dark to judge |
 | `PLC` | Prints whether the camera started |
 
 ## Connect it to a node
