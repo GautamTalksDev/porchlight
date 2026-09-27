@@ -58,6 +58,14 @@
 // After lights_on or lights_off, ignore presence this long (uniform light change looks like motion).
 #define CAMERA_PRESENCE_SUPPRESS_MS 10000
 #endif
+#ifndef GYRO_MOVED_DPS
+// Rotation rate (degrees per second) that counts as handling the beacon.
+#define GYRO_MOVED_DPS 40
+#endif
+#ifndef MOVED_ACCEL_G
+// Acceleration magnitude deviation from the resting baseline (g) that counts as moved.
+#define MOVED_ACCEL_G 0.35f
+#endif
 
 #if FALL_DETECTION || ALIVE_REPORTS
 #include <Arduino_LSM9DS1.h>
@@ -122,8 +130,14 @@ bool fallCountdownPrinted = false;
 
 #if ALIVE_REPORTS
 bool movedMarked = false;
+MovedReason movedReason = MovedReason::None;
 bool presenceMarked = false;
-uint8_t movedSamples = 0;
+uint8_t gyroMovedSamples = 0;
+uint8_t accelMovedSamples = 0;
+float restAccelG = 0.95f;
+bool restAccelSeeded = false;
+float lastGyroDps = 0;
+float lastAccelDevG = 0;
 unsigned long lastAliveReportAt = 0;
 #endif
 
@@ -304,11 +318,70 @@ void cancelFallCountdown() {
 #endif
 
 #if ALIVE_REPORTS
-void noteMotionSample(float mag) {
-  if (fabsf(mag - 1.0f) > 0.15f) {
-    if (movedSamples < 255) movedSamples += 1;
-    if (movedSamples >= 3) movedMarked = true;
+// Gyro is primary (handling the board). Acceleration is secondary against a slow resting baseline,
+// not a fixed 1 g: our board rests near 0.95 g and desk typing was falsely marking moved.
+void noteAliveMotion(float accelMag, bool haveAccel, float gyroMag, bool haveGyro) {
+  if (haveGyro) {
+    lastGyroDps = gyroMag;
+    if (gyroMag > (float)GYRO_MOVED_DPS) {
+      if (gyroMovedSamples < 255) gyroMovedSamples += 1;
+    } else {
+      gyroMovedSamples = 0;
+    }
   }
+  if (haveAccel) {
+    if (!restAccelSeeded) {
+      restAccelG = accelMag;
+      restAccelSeeded = true;
+    }
+    const float accelDev = fabsf(accelMag - restAccelG);
+    lastAccelDevG = accelDev;
+    if (accelDev > (float)MOVED_ACCEL_G) {
+      if (accelMovedSamples < 255) accelMovedSamples += 1;
+    } else {
+      accelMovedSamples = 0;
+      // Calm samples slowly pull the resting baseline toward the current magnitude.
+      restAccelG = restAccelG * 0.995f + accelMag * 0.005f;
+    }
+  }
+  if (movedMarked) return;
+  if (gyroMovedSamples >= 3) {
+    movedMarked = true;
+    movedReason = MovedReason::Rotation;
+  } else if (accelMovedSamples >= 3) {
+    movedMarked = true;
+    movedReason = MovedReason::Acceleration;
+  }
+}
+
+void printMotionNow() {
+  if (!imuReady) {
+    Serial.println("PLI motion sensor not ready");
+    return;
+  }
+  float gx = 0, gy = 0, gz = 0, ax = 0, ay = 0, az = 0;
+  float gyroMag = lastGyroDps;
+  float accelDev = lastAccelDevG;
+  if (IMU.gyroscopeAvailable()) {
+    IMU.readGyroscope(gx, gy, gz);
+    gyroMag = sqrtf(gx * gx + gy * gy + gz * gz);
+    lastGyroDps = gyroMag;
+  }
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(ax, ay, az);
+    const float mag = sqrtf(ax * ax + ay * ay + az * az);
+    if (!restAccelSeeded) {
+      restAccelG = mag;
+      restAccelSeeded = true;
+    }
+    accelDev = fabsf(mag - restAccelG);
+    lastAccelDevG = accelDev;
+  }
+  Serial.print("PLI motion gyro ");
+  Serial.print(gyroMag, 1);
+  Serial.print(" dps accel_dev ");
+  Serial.print(accelDev, 3);
+  Serial.println(" g");
 }
 #endif
 
@@ -354,10 +427,17 @@ void pollFall() {
     float x = 0, y = 0, z = 0;
     IMU.readAcceleration(x, y, z);
     mag = sqrtf(x * x + y * y + z * z);
-#if ALIVE_REPORTS
-    noteMotionSample(mag);
-#endif
   }
+#if ALIVE_REPORTS
+  float gyroMag = 0;
+  const bool haveGyro = IMU.gyroscopeAvailable();
+  if (haveGyro) {
+    float gx = 0, gy = 0, gz = 0;
+    IMU.readGyroscope(gx, gy, gz);
+    gyroMag = sqrtf(gx * gx + gy * gy + gz * gz);
+  }
+  if (haveReading || haveGyro) noteAliveMotion(mag, haveReading, gyroMag, haveGyro);
+#endif
 
   switch (fallPhase) {
     case FallPhase::Idle:
@@ -399,10 +479,21 @@ void pollFall() {
 #elif ALIVE_REPORTS
 void pollMotionOnly() {
   if (!imuReady) return;
-  if (!IMU.accelerationAvailable()) return;
-  float x = 0, y = 0, z = 0;
-  IMU.readAcceleration(x, y, z);
-  noteMotionSample(sqrtf(x * x + y * y + z * z));
+  float mag = 0;
+  const bool haveAccel = IMU.accelerationAvailable();
+  if (haveAccel) {
+    float x = 0, y = 0, z = 0;
+    IMU.readAcceleration(x, y, z);
+    mag = sqrtf(x * x + y * y + z * z);
+  }
+  float gyroMag = 0;
+  const bool haveGyro = IMU.gyroscopeAvailable();
+  if (haveGyro) {
+    float gx = 0, gy = 0, gz = 0;
+    IMU.readGyroscope(gx, gy, gz);
+    gyroMag = sqrtf(gx * gx + gy * gy + gz * gz);
+  }
+  if (haveAccel || haveGyro) noteAliveMotion(mag, haveAccel, gyroMag, haveGyro);
 }
 #endif
 
@@ -560,12 +651,18 @@ void pollAliveReport() {
   if (t - lastAliveReportAt < (unsigned long)ALIVE_EVERY_SEC * 1000UL) return;
   lastAliveReportAt = t;
   if (!movedMarked && !presenceMarked) return;
-  const uint8_t kind = movedMarked ? pl::KIND_MOVED : pl::KIND_PRESENCE;
-  sendFireAndForget(kind);
-  Serial.println(movedMarked ? "PLI moved" : "PLI presence");
+  if (movedMarked) {
+    sendFireAndForget(pl::KIND_MOVED);
+    Serial.println(movedReason == MovedReason::Rotation ? "PLI moved (rotation)" : "PLI moved (acceleration)");
+  } else {
+    sendFireAndForget(pl::KIND_PRESENCE);
+    Serial.println("PLI presence");
+  }
   movedMarked = false;
+  movedReason = MovedReason::None;
   presenceMarked = false;
-  movedSamples = 0;
+  gyroMovedSamples = 0;
+  accelMovedSamples = 0;
 }
 #endif
 
@@ -574,6 +671,7 @@ void pollAliveReport() {
 //   PLH            simulate a help press      PLO  simulate "I'm safe"      PLT  test frame
 //   PLX            jump to fall countdown (bench test, no drop needed)
 //   PLL            wait up to 300 ms for light, then print level or "no reading yet"
+//   PLM            print current gyro rate (dps) and acceleration deviation from rest (g)
 //   PLP            run one presence check now (prints yes, no, or too dark; never pixels)
 //   PLC            print camera status (ready or failed)
 void pollSerial() {
@@ -616,6 +714,10 @@ void pollSerial() {
       } else {
         Serial.println("PLI light no reading yet");
       }
+#endif
+#if ALIVE_REPORTS
+    } else if (strcmp(line, "PLM") == 0) {
+      printMotionNow();
 #endif
 #if CAMERA_PRESENCE
     } else if (strcmp(line, "PLP") == 0) {

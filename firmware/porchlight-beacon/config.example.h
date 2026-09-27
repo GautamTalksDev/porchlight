@@ -39,6 +39,10 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 #define CAMERA_TOO_DARK 18
 // After lights_on or lights_off, ignore presence this many ms (uniform light change looks like motion).
 #define CAMERA_PRESENCE_SUPPRESS_MS 10000
+// Rotation rate (degrees per second) that counts as handling the beacon. Desk vibration stays well below this.
+#define GYRO_MOVED_DPS 40
+// Acceleration magnitude deviation from a slow resting baseline (g), not a fixed 1 g. Our board rests near 0.95 g.
+#define MOVED_ACCEL_G 0.35
 // Ambient clear below this is dark. Measured on our board: room about 4, flashlight about 116, covered 0.
 // Re-check with PLL in the room where you demo, since lighting varies.
 #define LIGHT_DARK 1
