@@ -75,7 +75,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn-porch { background: #f2b35e; border-color: #f2b35e; color: #0c0f24; }
 .btn-signal { background: #ff6a55; border-color: #ff6a55; color: #2a0d08; }
 .btn-moon { background: #9ec5ff; border-color: #9ec5ff; color: #0c0f24; }
-.btn-small { min-height: 38px; padding: 0 1rem; font-size: 0.875rem; }
+.btn-small { min-height: 38px; min-width: 24px; padding: 0 1rem; font-size: 0.875rem; }
 
 /* Brand */
 .brand { display: inline-flex; align-items: center; gap: 0.75rem; text-decoration: none; }
@@ -145,7 +145,11 @@ html { scroll-behavior: smooth; }
 }
 .story-top[data-scrolled="true"] { background: rgba(8, 10, 26, 0.62); backdrop-filter: blur(14px) saturate(130%); border-bottom-color: rgba(236, 230, 217, 0.08); }
 .story-rail { position: fixed; right: 1.5rem; top: 50%; transform: translateY(-50%); z-index: 10; display: grid; gap: 0.7rem; }
-.story-rail button { position: relative; width: 12px; height: 12px; padding: 0; border-radius: 50%; border: 1.5px solid rgba(236, 230, 217, 0.45); background: transparent; cursor: pointer; transition: transform 250ms ease, background 250ms ease, border-color 250ms ease; }
+.story-rail button {
+  position: relative; width: 24px; height: 24px; padding: 0; border-radius: 50%;
+  border: 1.5px solid rgba(236, 230, 217, 0.45); background: transparent; cursor: pointer;
+  transition: transform 250ms ease, background 250ms ease, border-color 250ms ease;
+}
 .story-rail button[aria-current="step"] { background: #f2b35e; border-color: #f2b35e; transform: scale(1.35); box-shadow: 0 0 14px rgba(242, 179, 94, 0.8); }
 .rail-label { position: absolute; right: 22px; top: 50%; transform: translateY(-50%) translateX(6px); white-space: nowrap; font-size: 0.8rem; color: #ece6d9; opacity: 0; pointer-events: none; transition: opacity 200ms ease, transform 200ms ease; }
 .story-rail button:hover .rail-label, .story-rail button:focus-visible .rail-label, .story-rail button[aria-current="step"] .rail-label { opacity: 1; transform: translateY(-50%); }
@@ -183,7 +187,11 @@ html { scroll-behavior: smooth; }
 .hero-sub { font-size: clamp(1.1rem, 1.6vw, 1.35rem); color: #d4cfe0; max-width: 36rem; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7); }
 .word { display: inline-block; animation: word-rise 1100ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 @keyframes word-rise { from { opacity: 0; transform: translateY(0.45em); filter: blur(12px); } to { opacity: 1; transform: none; filter: none; } }
-.scroll-cue { position: absolute; left: 50%; bottom: 3.5vh; transform: translateX(-50%); display: grid; justify-items: center; gap: 0.6rem; background: none; border: 0; color: #b3aec6; font-size: 0.8rem; cursor: pointer; }
+.scroll-cue {
+  position: absolute; left: 50%; bottom: 3.5vh; transform: translateX(-50%);
+  display: grid; justify-items: center; gap: 0.6rem; min-width: 44px; min-height: 44px;
+  background: none; border: 0; color: #b3aec6; font-size: 0.8rem; cursor: pointer;
+}
 .scroll-line { width: 1px; height: 54px; background: linear-gradient(180deg, transparent, #f2b35e); animation: scroll-line 2.2s ease-in-out infinite; transform-origin: top; }
 @keyframes scroll-line { 0% { transform: scaleY(0); opacity: 0; } 40% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(1) translateY(20px); opacity: 0; } }
 
@@ -243,6 +251,8 @@ html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .story-grain { display: none; }
+  .word, .reveal { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .wave span { animation: none !important; }
 }
 
 /* App shell (ops) */
@@ -279,6 +289,9 @@ html { scroll-behavior: smooth; }
 .ops-dock { left: 392px; right: 16px; bottom: 16px; height: 180px; padding: 1rem 1.3rem; display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: 2rem; animation-delay: 220ms; }
 .section-title { font-size: 1.25rem; font-weight: 800; }
 .section-sub { color: #b3aec6; font-size: 0.875rem; }
+.what-to-bring { display: grid; gap: 0.4rem; }
+.what-to-bring-list { list-style: disc; padding-left: 1.2rem; color: #ece6d9; font-size: 0.875rem; display: grid; gap: 0.3rem; }
+.what-to-bring-list li { padding-left: 0.1rem; }
 
 .ops-hud { position: absolute; z-index: 5; top: 16px; left: 392px; right: 402px; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; pointer-events: none; }
 .hud-chip {
@@ -499,8 +512,12 @@ kbd { font-family: "Atkinson Mono", ui-monospace, monospace; font-size: 0.75rem;
 .present-caption a { color: #9ec5ff; }
 .present-controls { position: absolute; top: 1.5rem; right: 1.5rem; z-index: 3; display: flex; gap: 0.5rem; align-items: center; }
 .present-progress { position: absolute; top: 1.5rem; left: 1.5rem; z-index: 3; display: flex; gap: 6px; align-items: center; }
-.present-progress button { width: 28px; height: 6px; border-radius: 3px; border: 0; background: #343b63; cursor: pointer; padding: 0; }
-.present-progress button[aria-current="step"] { background: #f2b35e; }
+.present-progress button.present-step {
+  min-width: 24px; min-height: 24px; width: 28px; height: 24px; border-radius: 4px; border: 0;
+  background: #343b63; cursor: pointer; padding: 0;
+}
+.present-progress button.present-step[aria-current="step"] { background: #f2b35e; }
+.present-city { position: absolute; inset: 0; pointer-events: none; }
 .present-panel {
   position: absolute; right: 2rem; top: 50%; transform: translateY(-50%); z-index: 3;
   width: min(380px, calc(100% - 2rem)); display: grid; gap: 0.75rem;

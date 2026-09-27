@@ -236,18 +236,27 @@ export default function Presenter({ households, nodeHouseIds, needs, sim }: Prop
 
   return (
     <main className="present">
-      <CityCanvas
-        households={households}
-        nodeHouseIds={nodeHouseIds}
-        labels="active"
-        onReady={(c) => {
-          cityRef.current = c;
-          apply(index);
-        }}
-      />
+      <div className="present-city" aria-hidden="true">
+        <CityCanvas
+          households={households}
+          nodeHouseIds={nodeHouseIds}
+          labels="active"
+          onReady={(c) => {
+            cityRef.current = c;
+            apply(index);
+          }}
+        />
+      </div>
       <nav className="present-progress" aria-label="Chapters">
         {list.map((c, i) => (
-          <button key={c.kicker} type="button" aria-label={`Chapter ${i + 1}: ${c.kicker}`} aria-current={i === index ? "step" : undefined} onClick={() => setIndex(i)} />
+          <button
+            key={c.kicker}
+            type="button"
+            className="present-step"
+            aria-label={`Chapter ${i + 1}: ${c.kicker}`}
+            aria-current={i === index ? "step" : undefined}
+            onClick={() => setIndex(i)}
+          />
         ))}
       </nav>
       <div className="present-controls">
@@ -274,7 +283,7 @@ export default function Presenter({ households, nodeHouseIds, needs, sim }: Prop
       {ch.panel === "voice" ? (
         <aside className="present-panel" aria-label="Call transcript">
           <p className="present-kicker">Opening line</p>
-          <p>{FR_SCRIPT}</p>
+          <p lang="fr">{FR_SCRIPT}</p>
           <p className="hint-keys">“Hello, this is Porchlight calling for the city. We received your call for help. Are you safe right now?”</p>
         </aside>
       ) : null}

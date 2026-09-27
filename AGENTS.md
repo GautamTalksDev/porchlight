@@ -18,6 +18,7 @@ The codebase is your memory. Before writing something new, find the closest exis
 | When you need | Copy this |
 | - | - |
 | A new city API route | apps/city/app/api/actions/route.ts: auth check, rate limit, zod schema, error handling |
+| Open311 / machine-readable city feed | apps/city/lib/open311.ts (pure map) and apps/city/app/api/open311/v2 |
 | New pure logic | apps/city/lib/triage-core.ts, with a test next to the others in apps/city/test |
 | A change to events or frames | packages/protocol/src, with a test in packages/protocol/test/protocol.test.ts |
 | A graceful fallback when a service is down | apps/city/lib/triage.ts: timeout, fallback, and a note shown on screen |

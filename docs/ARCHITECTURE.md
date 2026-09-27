@@ -122,6 +122,8 @@ flowchart TB
     OPS ==> VS["/api/voice/session<br/>short-lived signed URL"]
     VS ==> EL["ElevenLabs agent<br/>in the browser"]
     EL ==>|mark_safe, request_responder| ACT
+    MEM ==> O311["/api/open311/v2<br/>GeoReport JSON feed"]
+    O311 ==> CAD["City 311 or CAD"]
 ```
 
 * **Write first, then acknowledge.** An event is in Tiger Data before the node is told it arrived.
@@ -129,6 +131,7 @@ flowchart TB
 * **The city acts like another neighbour for its own decisions.** Each ingest reply includes recent city-signed events. Nodes verify them, keep them, and gossip them onward, so a dispatch or mark-safe made in the operations room clears the same call on every node console.
 * **Silence is a signal.** When a coordinator declares an emergency, the city watches vulnerable homes (those with recorded needs) that send no sign of life for a configurable stretch of time. Beacon `alive` events with signal `motion`, `presence` or `lights_on` clear the silent list; `lights_off` does not. Homes with a power-dependent need (oxygen concentrator, home dialysis, insulin refrigeration) that report `lights_off` get a Power out tag, doubled silent risk, and a +10 triage boost with reason. The people who need help most are often the ones who never call, so the operations room can check in or send someone before a beacon is pressed.
 * **Porch Circles in the city.** The city reads the same `BUDDY_WINDOW_SEC` and `STREET_WINDOW_SEC` as the nodes. For every open incident it computes the escalation tier, lists the registered buddies, and builds the neighbour reply thread. Triage scores a "city" tier higher (+15) than "street" (+5) or "buddies", and the operations room shows chips, the Neighbours panel, trust-trail labels, and amber buddy arcs in the 3D view while a call is still in the buddies window. Signed `reply` events are accepted at ingest; Tiger Data's kind check includes `reply`.
+* **Open311 for existing city systems.** `GET /api/open311/v2/services.json`, `requests.json`, and `requests/{id}.json` expose calls, silent-home wellness checks, and power-out homes in GeoReport v2 JSON. Access is a coordinator session or `X-Porchlight-Open311-Key`. Descriptions list need categories only.
 * **Analytics come from TimescaleDB.** The last hour timeline reads a continuous aggregate (`events_per_minute`) with real-time blending. On plain PostgreSQL the same numbers are computed on the fly.
 
 ## The data model

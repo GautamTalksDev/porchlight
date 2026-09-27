@@ -66,10 +66,10 @@ export default function CityCanvas({ households, nodeHouseIds, labels, autoRotat
 
   if (failed) {
     return (
-      <div className="city city-fallback">
-        <p>The 3D city needs WebGL, which this browser has turned off. Everything else on this page still works.</p>
+      <div className="city city-fallback" role="img" aria-label="3D city unavailable">
+        <p>The 3D city needs WebGL, which this browser has turned off. Everything else on this page still works. Use the street list to select homes.</p>
       </div>
     );
   }
-  return <div className="city" ref={ref} />;
+  return <div className="city" ref={ref} aria-hidden="true" role="presentation" />;
 }

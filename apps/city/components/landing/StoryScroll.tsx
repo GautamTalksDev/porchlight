@@ -290,7 +290,7 @@ export default function StoryScroll({ households, nodeHouseIds, needs, sim, repo
               <a className="btn btn-quiet" href="/ops">Open the operations room</a>
             </div>
           </div>
-          <button className="scroll-cue" type="button" onClick={() => go(1)}>
+          <button className="scroll-cue" type="button" onClick={() => go(1)} aria-label="Scroll to the next chapter">
             <span>Scroll</span>
             <span className="scroll-line" aria-hidden="true" />
           </button>

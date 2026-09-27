@@ -49,6 +49,8 @@ export const RosterFile = z.object({
     z.object({
       label: z.string().max(80),
       lang: z.enum(["en", "fr"]).default("en"),
+      /** Fictional demo needs so the console can show offline guidance. Real deployments may omit these. */
+      needs: z.array(z.string()).default([]),
       buddies: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/)).default([]),
     }),
   ),

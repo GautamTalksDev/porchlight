@@ -8,6 +8,7 @@ import type { PorchlightCity } from "@/lib/city/scene";
 import { isFall } from "@/lib/fall";
 import { formatJourneyBreadcrumb, journeyFromTrail, resolveNodeHouseholds, type JourneyHop } from "@/lib/journey";
 import { aliveTrailLabel, formatSignsOfLifeLine } from "@/lib/power";
+import { guidanceForNeeds } from "@/lib/needs-guidance";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { useCopilot } from "./useCopilot";
@@ -337,6 +338,8 @@ export default function OpsRoom({
       .sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1))[0] ?? null;
   const ranked = triage?.items.find((r) => r.household === selectedId) ?? null;
   const trail = (selectedId && snap?.trail[selectedId]) || [];
+  const needIds = (household?.needs ?? []).map((n) => n.id);
+  const guidance = guidanceForNeeds(needIds);
   const journeyHops = useMemo(
     () => (selectedId && snap ? journeyHopsFor(snap, selectedId) : []),
     [selectedId, snap],
@@ -383,20 +386,30 @@ export default function OpsRoom({
     }
   };
 
-  const sendSomeoneSilent = async (householdId: string, label: string, minutesSilent: number) => {
-    try {
-      const result = await post("/api/actions", {
-        kind: "ack",
-        household: householdId,
-        note: `Proactive wellness check: not heard from for ${minutesSilent} minutes`,
-      });
-      if (result.already) showToast(`Help is already on the way to ${label}`);
-      else showToast(`Someone is on the way to ${label}`);
-      void refreshTriage();
-    } catch (err) {
-      showToast((err as Error).message);
-    }
-  };
+  const sendSomeone = useCallback(
+    async (householdId: string, label: string, note?: string) => {
+      try {
+        const result = await post("/api/actions", {
+          kind: "ack",
+          household: householdId,
+          ...(note ? { note } : {}),
+        });
+        if (result.already) showToast(`Help is already on the way to ${label}`);
+        else showToast(`Someone is on the way to ${label}`);
+        void refreshTriage();
+      } catch (err) {
+        showToast((err as Error).message);
+      }
+    },
+    [showToast, refreshTriage],
+  );
+
+  const sendSomeoneSilent = useCallback(
+    async (householdId: string, label: string, minutesSilent: number) => {
+      await sendSomeone(householdId, label, `Proactive wellness check: not heard from for ${minutesSilent} minutes`);
+    },
+    [sendSomeone],
+  );
 
   const runDemoReset = async () => {
     if (demoResetBusyRef.current || resetBusy) return;
@@ -459,7 +472,10 @@ export default function OpsRoom({
       }
       if (key === "j" && items.length) choose(items[Math.min(items.length - 1, idx + 1)]!.household);
       else if (key === "k" && items.length) choose(items[Math.max(0, idx - 1)]!.household);
-      else if (key === "c" && household && !copilotBusy && !copilotOpen) void startResidentCall(household.id, incident?.key ?? null);
+      else if (key === "c" && household && !copilotBusy && !copilotOpen) {
+        if (guidance.voiceCallSuitable) void startResidentCall(household.id, incident?.key ?? null);
+        else void sendSomeone(household.id, household.label);
+      }
       else if (key === "v" && copilot.available && !voiceBusy) void startCopilot();
       else if (key === "d" && incident?.status === "open") void act("ack");
       else if (key === "s" && household) void act("ok");
@@ -491,6 +507,8 @@ export default function OpsRoom({
     choose,
     startCopilot,
     startResidentCall,
+    sendSomeone,
+    guidance.voiceCallSuitable,
     demoResetEnabled,
     resetConfirm,
     preflightOpen,
@@ -584,17 +602,23 @@ export default function OpsRoom({
           {authMode === "auth0" ? <a className="btn btn-quiet btn-small" href="/auth/logout">Sign out</a> : null}
         </div>
       </header>
-      {authMode === "local-open" ? <p className="banner">Sign-in is off because this is local development. In production this room requires Auth0.</p> : null}
+      {authMode === "local-open" ? (
+        <p className="banner" role="status" aria-live="polite">
+          Sign-in is off because this is local development. In production this room requires Auth0.
+        </p>
+      ) : null}
       {sessionEnded ? (
-        <p className="banner banner-warn">
+        <p className="banner banner-warn" role="alert" aria-live="assertive">
           Your sign-in ended. <a href="/auth/login?returnTo=/ops">Sign in again</a>
         </p>
       ) : !connected ? (
-        <p className="banner banner-warn">Reconnecting to the city server…</p>
+        <p className="banner banner-warn" role="status" aria-live="polite">
+          Reconnecting to the city server…
+        </p>
       ) : null}
 
       <main className="ops-stage">
-        <section className="ops-city" aria-label="City view">
+        <section className="ops-city" aria-hidden="true">
           {snap ? (
             <CityCanvas
               households={cityHouseholds}
@@ -673,6 +697,12 @@ export default function OpsRoom({
                   : `${preflightSummary.passed} of ${preflightSummary.total} checks passed.`
                 : null}
             </p>
+            <p className="section-sub">
+              Open311 feed{" "}
+              <a href="/api/open311/v2/requests.json" target="_blank" rel="noopener noreferrer">
+                /api/open311/v2/requests.json
+              </a>
+            </p>
             <button className="btn btn-quiet btn-small" type="button" onClick={() => void loadPreflight()} disabled={preflightLoading}>
               Check again
             </button>
@@ -709,11 +739,24 @@ export default function OpsRoom({
         ) : null}
 
         {arrival ? (
-          <button type="button" className="arrival" onClick={() => choose(arrival.household)}>
+          <button
+            type="button"
+            className="arrival"
+            onClick={() => choose(arrival.household)}
+            aria-live="assertive"
+            role="alert"
+          >
             <span className="arrival-dot" aria-hidden="true" />
             <span>
               <strong>{arrival.fall ? "Possible fall detected" : "New call for help"}</strong>
-              <span>{arrival.label}. Press C to call, D to dispatch.</span>
+              <span>
+                {arrival.label}.{" "}
+                {guidanceForNeeds(
+                  (snap?.households.find((h) => h.id === arrival.household)?.needs ?? []).map((n) => n.id),
+                ).voiceCallSuitable
+                  ? "Press C to call, D to dispatch."
+                  : "Press C to send someone, D to dispatch."}
+              </span>
             </span>
           </button>
         ) : null}
@@ -820,7 +863,11 @@ export default function OpsRoom({
             )}
             {snap?.silent?.length ? (
               <ul className="silence-list">
-                {snap.silent.map((s) => (
+                {snap.silent.map((s) => {
+                  const silentNeeds =
+                    (snap.households.find((h) => h.id === s.household)?.needs ?? []).map((n) => n.id);
+                  const silentGuidance = guidanceForNeeds(silentNeeds);
+                  return (
                   <li key={s.household}>
                     <button type="button" className="silence-card" onClick={() => choose(s.household)}>
                       <span className="call-name">{s.label}</span>
@@ -833,27 +880,42 @@ export default function OpsRoom({
                       </span>
                     </button>
                     <div className="row">
-                      <button
-                        className="btn btn-porch btn-small"
-                        type="button"
-                        onClick={() => {
-                          choose(s.household);
-                          void startResidentCall(s.household, null);
-                        }}
-                        disabled={voice.state === "connecting" || copilotBusy}
-                      >
-                        Check in
-                      </button>
-                      <button
-                        className="btn btn-small"
-                        type="button"
-                        onClick={() => void sendSomeoneSilent(s.household, s.label, s.minutesSilent)}
-                      >
-                        Send someone
-                      </button>
+                      {silentGuidance.voiceCallSuitable ? (
+                        <button
+                          className="btn btn-porch btn-small"
+                          type="button"
+                          onClick={() => {
+                            choose(s.household);
+                            void startResidentCall(s.household, null);
+                          }}
+                          disabled={voice.state === "connecting" || copilotBusy}
+                        >
+                          Check in
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-porch btn-small"
+                          type="button"
+                          onClick={() => void sendSomeone(s.household, s.label)}
+                        >
+                          Send someone
+                        </button>
+                      )}
+                      {silentGuidance.voiceCallSuitable ? (
+                        <button
+                          className="btn btn-small"
+                          type="button"
+                          onClick={() => void sendSomeoneSilent(s.household, s.label, s.minutesSilent)}
+                        >
+                          Send someone
+                        </button>
+                      ) : (
+                        <p className="section-sub">{silentGuidance.voiceUnsuitableNote}</p>
+                      )}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             ) : (
               <p className="section-sub">
@@ -903,17 +965,42 @@ export default function OpsRoom({
                 {ranked ? <p>{ranked.reason}</p> : null}
               </div>
               <div className="actions">
-                <button
-                  className="btn btn-porch"
-                  type="button"
-                  onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
-                  disabled={voice.state === "connecting" || copilotBusy}
-                >
-                  {voice.state === "idle" || voice.state === "error" ? `Call in ${household.lang === "fr" ? "French" : "English"}` : "Calling…"}
-                </button>
+                {guidance.voiceCallSuitable ? (
+                  <button
+                    className="btn btn-porch"
+                    type="button"
+                    onClick={() => void startResidentCall(household.id, incident?.key ?? null)}
+                    disabled={voice.state === "connecting" || copilotBusy}
+                  >
+                    {voice.state === "idle" || voice.state === "error"
+                      ? `Call in ${household.lang === "fr" ? "French" : "English"}`
+                      : "Calling…"}
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-porch"
+                    type="button"
+                    onClick={() => void sendSomeone(household.id, household.label)}
+                  >
+                    Send someone
+                  </button>
+                )}
                 <button className="btn btn-moon" type="button" onClick={() => act("ack")} disabled={!incident || incident.status !== "open"}>Dispatch a neighbour</button>
                 <button className="btn btn-quiet" type="button" onClick={() => act("ok")}>Mark safe</button>
               </div>
+              {!guidance.voiceCallSuitable ? (
+                <p className="section-sub">{guidance.voiceUnsuitableNote}</p>
+              ) : null}
+              {guidance.lines.length ? (
+                <section className="what-to-bring" aria-labelledby="bring-h">
+                  <h3 id="bring-h" className="section-title">What to bring</h3>
+                  <ul className="what-to-bring-list">
+                    {guidance.lines.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
               {incident ? (
                 <section className="neighbours" aria-labelledby="neighbours-h">
                   <h3 id="neighbours-h" className="section-title">Neighbours</h3>
@@ -948,7 +1035,7 @@ export default function OpsRoom({
                 <p className="voice-state" data-live={String(["speaking", "listening", "playing"].includes(voice.state))}>
                   {{ idle: "No call in progress.", connecting: "Connecting…", speaking: "Agent is speaking", listening: "Listening to the resident", playing: "Playing the opening line", error: voice.error ?? "The call failed." }[voice.state]}
                 </p>
-                {voice.state === "error" ? (
+                {voice.state === "error" && guidance.voiceCallSuitable ? (
                   <div className="copilot-actions">
                     <button
                       className="btn btn-porch btn-small"
@@ -1022,10 +1109,10 @@ export default function OpsRoom({
               ) : null}
             </>
           ) : (
-            <section aria-labelledby="detail-h">
+              <section aria-labelledby="detail-h">
               <h2 id="detail-h" className="section-title">The street right now</h2>
-              <p className="section-sub">Select a home to see who lives there, what they need, and how their calls reached you.</p>
-              <ul className="street">
+              <p className="section-sub">Select a home to see who lives there, what they need, and how their calls reached you. This list is the accessible equivalent of the 3D city map.</p>
+              <ul className="street" aria-label="Street homes">
                 {(snap?.households ?? []).map((h) => (
                   <li key={h.id}>
                     <button type="button" className="street-row" onClick={() => choose(h.id)}>

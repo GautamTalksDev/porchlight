@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { buildOverview, resolveHousehold } from "@/lib/copilot";
+import { startCheckInCopilotDecision } from "@/lib/needs-guidance";
 import type { CitySnapshot } from "@/lib/city";
 import { formatSignsOfLifeLine } from "@/lib/power";
 import type { TriageResult } from "@/lib/triage";
@@ -276,9 +277,15 @@ export function useCopilot(opts: {
             const hit = find(p?.address);
             if (!hit) return tool(`Check in ${p?.address ?? "address"}`, UNKNOWN);
             const live = optsRef.current.liveRef.current;
+            const home = live.snap?.households.find((h) => h.id === hit.id);
+            const needIds = (home?.needs ?? []).map((n) => n.id);
+            const decision = startCheckInCopilotDecision(needIds);
+            if (!decision.startCall) {
+              optsRef.current.onSelect(hit.id);
+              return tool(`Check in ${hit.label}`, decision.reply);
+            }
             const open = live.snap?.incidents.find((i) => i.household === hit.id && i.status !== "resolved");
-            const reply = "Starting the check-in call now.";
-            addLine({ who: "tool", text: `Check in ${hit.label}: Starting the check-in call now.` });
+            addLine({ who: "tool", text: `Check in ${hit.label}: ${decision.reply}` });
             optsRef.current.onToolUsed();
             setTimeout(() => {
               void (async () => {
@@ -287,7 +294,7 @@ export function useCopilot(opts: {
                 optsRef.current.onStartCheckIn(hit.id, open?.key ?? null);
               })();
             }, 2200);
-            return reply;
+            return decision.reply;
           },
           set_emergency: async (p: { active?: boolean }) => {
             const active = Boolean(p?.active);

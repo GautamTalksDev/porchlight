@@ -39,6 +39,16 @@ flowchart LR
 5. **Hey Porchlight.** The coordinator can talk to the operations room. A voice copilot summarises the queue, flies the 3D map to a home, dispatches a neighbour, or starts a resident check-in, hands free, while every action stays on the signed event log.
 6. **Porch Circles.** Each vulnerable home has two nearby buddies. A call reaches those buddies first, then the whole street, then the city, with signed neighbour replies that work even when the city link is cut. The city accepts those `reply` events end to end, shows the escalation tier and reply thread in the operations room, and ranks a home higher once no neighbour has answered.
 
+## Works with the City's existing systems
+
+Porchlight exposes an [Open311 GeoReport v2](https://wiki.open311.org/GeoReport_v2/) compatible JSON feed so a city's 311 or CAD tools can read the same calls the operations room sees:
+
+* `GET /api/open311/v2/services.json` lists three services: call for help, wellness check for a silent home, and power-dependent resident without power.
+* `GET /api/open311/v2/requests.json` lists open and closed requests (filter with `status`, `service_code`, `start_date`, `end_date`).
+* `GET /api/open311/v2/requests/{id}.json` returns one request.
+
+Access is a signed-in coordinator, or the header `X-Porchlight-Open311-Key` matching `OPEN311_KEY`. Descriptions carry need categories only, never free text from the street. Porchlight-specific fields use a `porchlight_` prefix (priority reason, escalation tier, signature verified).
+
 ## What we proved
 
 | Claim | Evidence |

@@ -19,6 +19,9 @@ describe("porch circles buddies", () => {
       const a = [...(street.households[id]?.buddies ?? [])].sort();
       const b = [...(city.households[id]?.buddies ?? [])].sort();
       assert.deepEqual(a, b, `${id} buddies differ between households.json and city-registry.json`);
+      const streetNeeds = [...((street.households[id] as { needs?: string[] } | undefined)?.needs ?? [])].sort();
+      const cityNeeds = [...(city.households[id]?.needs ?? [])].sort();
+      assert.deepEqual(streetNeeds, cityNeeds, `${id} needs differ between households.json and city-registry.json`);
     }
     assert.deepEqual(city.households["hh-maple-12"]!.buddies, ["hh-oak-19", "hh-birch-4"]);
     for (const [id, h] of Object.entries(city.households)) {

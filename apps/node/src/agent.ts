@@ -573,6 +573,7 @@ export class NodeAgent {
         ...h,
         label: label(h.household),
         lang: this.langFor(h.household),
+        needs: info?.needs ?? [],
         buddies: info?.buddies ?? [],
         signOfLife,
       };
@@ -626,11 +627,13 @@ export class NodeAgent {
           buddyWindowSec: this.config.buddyWindowSec,
           streetWindowSec: this.config.streetWindowSec,
         });
-        const buddies = this.config.households.households[i.household]?.buddies ?? [];
+        const info = this.config.households.households[i.household];
+        const buddies = info?.buddies ?? [];
         const isBuddy = Boolean(myHome && buddies.includes(myHome));
         return {
           ...i,
           label: label(i.household),
+          needs: info?.needs ?? [],
           openedAtMs,
           tier,
           isBuddy,

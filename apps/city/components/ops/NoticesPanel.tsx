@@ -184,6 +184,7 @@ export const NoticesPanel = forwardRef<
         French
         <textarea
           id="notice-fr"
+          lang="fr"
           rows={3}
           maxLength={320}
           value={fr}
@@ -220,7 +221,11 @@ export const NoticesPanel = forwardRef<
             return (
               <li key={n.id} data-severity={n.severity}>
                 <p className="notice-sent-en">{n.en}</p>
-                {openFr ? <p className="section-sub">{n.fr}</p> : null}
+                {openFr ? (
+                  <p className="section-sub" lang="fr">
+                    {n.fr}
+                  </p>
+                ) : null}
                 <p className="call-meta">
                   {clock(n.at)} · {n.severity === "urgent" ? "Urgent" : "Information"} · Reached {n.reachedNodes} of{" "}
                   {n.totalNodes} nodes

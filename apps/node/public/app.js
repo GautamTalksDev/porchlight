@@ -1,4 +1,5 @@
 // Porchlight node console. No framework, no inline scripts, DOM built with textContent only.
+import { guidanceForNeeds } from "./needs-guidance.js";
 
 let TOKEN = document.querySelector('meta[name="pl-token"]').content;
 let sessionReady = false;
@@ -224,7 +225,7 @@ function renderNotices(notices) {
         { class: "city-notice", dataset: { severity: n.severity } },
         el("p", { class: "city-notice-kicker" }, "Notice from the City"),
         el("p", { class: "city-notice-en" }, n.en),
-        el("p", { class: "city-notice-fr" }, n.fr),
+        el("p", { class: "city-notice-fr", lang: "fr" }, n.fr),
         el("p", { class: "city-notice-meta" }, `${ago(n.at)} · ${n.severity === "urgent" ? "Urgent" : "Information"}`),
         el(
           "div",
@@ -356,25 +357,45 @@ function waitSeconds(i) {
 }
 
 /** Porch Circles line on a call card. Null when the call is acknowledged (no tier). */
-function circleBanner(i) {
+function circleBanner(i, needs) {
   if (!i.tier) return null;
+  let banner = null;
   if (i.tier === "buddies") {
     if (i.isBuddy) {
-      return el("p", { class: "circle-banner circle-buddy" }, `You're a buddy for ${i.label}. They need you.`);
+      banner = el("p", { class: "circle-banner circle-buddy" }, `You're a buddy for ${i.label}. They need you.`);
+    } else {
+      banner = el("p", { class: "circle-quiet" }, "Buddies alerted");
     }
-    return el("p", { class: "circle-quiet" }, "Buddies alerted");
-  }
-  if (i.tier === "street") {
-    return el("p", { class: "circle-banner circle-street" }, `No buddy has answered in ${waitSeconds(i)} s. Can anyone go?`);
-  }
-  if (i.tier === "city") {
-    return el(
+  } else if (i.tier === "street") {
+    banner = el("p", { class: "circle-banner circle-street" }, `No buddy has answered in ${waitSeconds(i)} s. Can anyone go?`);
+  } else if (i.tier === "city") {
+    banner = el(
       "p",
       { class: "circle-banner circle-city" },
       `No neighbour has answered in ${waitSeconds(i)} s. The city has been alerted.`,
     );
   }
-  return null;
+  if (!banner) return null;
+  if (i.isBuddy && i.tier === "buddies") {
+    const bring = whatToBring(needs);
+    if (bring) return el("div", { class: "circle-with-bring" }, banner, bring);
+  }
+  return banner;
+}
+
+function whatToBring(needs) {
+  const lines = guidanceForNeeds(needs ?? []).lines;
+  if (!lines.length) return null;
+  return el(
+    "div",
+    { class: "what-to-bring" },
+    el("p", { class: "what-to-bring-title" }, "What to bring"),
+    el(
+      "ul",
+      { class: "what-to-bring-list" },
+      ...lines.map((line) => el("li", {}, line)),
+    ),
+  );
 }
 
 function replyThread(replies) {
@@ -402,13 +423,15 @@ function renderAlerts(incidents) {
       const heard = i.witnesses.length === 1 ? "Heard by 1 node" : `Heard by ${i.witnesses.length} nodes`;
       const acked = i.status === "acknowledged";
       const openedMs = i.openedAtMs ?? hlcWall(i.openedAt);
+      const needs = i.needs ?? state?.households.find((h) => h.household === i.household)?.needs ?? [];
       return el(
         "li",
         { class: "alert", dataset: { status: i.status, tier: i.tier ?? "" } },
-        circleBanner(i),
+        circleBanner(i, needs),
         el("p", { class: "alert-title" }, i.label),
         el("p", { class: "alert-meta" }, `${acked ? "A neighbour is on the way." : "Waiting for a neighbour."} ${heard}, ${ago(openedMs)}.`),
         i.showFall ? el("p", {}, "Possible fall, no button pressed") : i.note && i.note !== FALL_NOTE ? el("p", {}, i.note) : null,
+        whatToBring(needs),
         acked
           ? null
           : el(
