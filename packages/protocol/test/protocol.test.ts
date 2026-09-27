@@ -196,6 +196,22 @@ describe("beacon frames", () => {
     assert.equal(g.check(mk(3)), "accept");
     assert.equal(g.check(mk(2)), "replay");
   });
+  it("treats an exact double send as duplicate and an older counter as replay", () => {
+    let t = 0;
+    const g = new BeaconGuard(750, () => t);
+    const mk = (counter: number) => ({
+      beaconId: "pl-b01",
+      kind: "lights_on" as const,
+      session: 3,
+      counter,
+      incident: "",
+    });
+    assert.equal(g.check(mk(10)), "accept");
+    t += 1000;
+    assert.equal(g.check(mk(10)), "duplicate");
+    assert.equal(g.check(mk(9)), "replay");
+    assert.equal(g.check(mk(11)), "accept");
+  });
 });
 
 describe("projection", () => {

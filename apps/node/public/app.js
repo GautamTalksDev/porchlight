@@ -1,5 +1,6 @@
 // Porchlight node console. No framework, no inline scripts, DOM built with textContent only.
 import { guidanceForNeeds } from "./needs-guidance.js";
+import { houseStatusParts } from "./street-status.js";
 
 let TOKEN = document.querySelector('meta[name="pl-token"]').content;
 let sessionReady = false;
@@ -292,8 +293,13 @@ function renderUplink(u) {
 function renderStreet(households) {
   const list = $("#street");
   list.replaceChildren(
-    ...households.map((h) =>
-      el(
+    ...households.map((h) => {
+      const line = houseStatusParts({
+        label: h.label,
+        statusText: STATUS_TEXT[h.status] ?? h.status,
+        signOfLife: h.signOfLife || null,
+      });
+      return el(
         "li",
         {},
         el(
@@ -302,7 +308,7 @@ function renderStreet(households) {
             class: "house",
             type: "button",
             dataset: { status: h.status },
-            "aria-label": `${h.label}: ${h.signOfLife || STATUS_TEXT[h.status]}`,
+            "aria-label": line.aria,
             onclick: () => openSheet(h),
           },
           el(
@@ -314,10 +320,15 @@ function renderStreet(households) {
             el("span", { class: "house-porch" }),
           ),
           el("span", { class: "house-label" }, h.label),
-          el("span", { class: "house-status" }, h.signOfLife || STATUS_TEXT[h.status]),
+          el(
+            "span",
+            { class: "house-status" },
+            el("span", { class: "house-status-primary" }, line.primary),
+            line.secondary ? el("span", { class: "house-status-sign" }, line.secondary) : null,
+          ),
         ),
-      ),
-    ),
+      );
+    }),
   );
 }
 
@@ -603,8 +614,13 @@ async function relayFrame(beaconId, hex, via) {
   try {
     const r = await api("/api/beacon", { beaconId, frame: hex, via });
     if (r.ok) onBeaconAccepted(r);
+    // Exact duplicates (fire-and-forget double send) come back as ok:false with reason duplicate
+    // on HTTP 200 and must stay silent. Genuine replays throw below.
   } catch (err) {
-    if (err.data?.reason !== "duplicate") toast(`Beacon: ${err.message}`, "error");
+    const reason = err.data?.reason;
+    if (reason === "duplicate") return;
+    if (reason === "replay") toast("Beacon: replay", "error");
+    else toast(`Beacon: ${err.message}`, "error");
   }
 }
 

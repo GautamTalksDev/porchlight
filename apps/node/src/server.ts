@@ -38,6 +38,22 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
+/**
+ * Map a request path to a single file name under apps/node/public (no subfolders).
+ * Every .js file at the public root is served so console modules can import each other
+ * without a hand-maintained allow list. CSS and the favicon stay explicit.
+ * Returns null when the path must not be served from the public root.
+ */
+export function resolvePublicRootFile(pathname: string): string | null {
+  if (pathname === "/styles.css" || pathname === "/favicon.svg") return pathname.slice(1);
+  // One segment only: letters, digits, dot, underscore, hyphen; must end in .js.
+  const m = /^\/([A-Za-z0-9][A-Za-z0-9._-]{0,62}\.js)$/.exec(pathname);
+  if (!m) return null;
+  const name = m[1]!;
+  if (name.includes("..") || name.includes("/") || name.includes("\\")) return null;
+  return name;
+}
+
 const BeaconBody = z.strictObject({
   beaconId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/),
   frame: z.string().regex(/^[0-9a-f]{36}$/),
@@ -157,8 +173,9 @@ export function createNodeServer(agent: NodeAgent): { server: Server; sessionTok
       res.writeHead(200, { ...SECURITY_HEADERS, "content-type": MIME[".html"]!, "cache-control": "no-store" });
       return res.end(html);
     }
-    if (method === "GET" && /^\/(app\.js|needs-guidance\.js|styles\.css|favicon\.svg)$/.test(path)) {
-      return serveFile(res, join(PUBLIC_DIR, path.slice(1)));
+    const rootFile = resolvePublicRootFile(path);
+    if (method === "GET" && rootFile) {
+      return serveFile(res, join(PUBLIC_DIR, rootFile));
     }
     let m = /^\/audio\/(en|fr)\/([a-z0-9-]{1,40}\.mp3)$/.exec(path);
     if (method === "GET" && m) return serveFile(res, normalize(join(PUBLIC_DIR, "audio", m[1]!, m[2]!)), "public, max-age=3600");

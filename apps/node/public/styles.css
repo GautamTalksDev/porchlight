@@ -222,7 +222,9 @@ button, input { font: inherit; color: inherit; }
   transition: background-color 600ms ease, box-shadow 600ms ease;
 }
 .house-label { font-weight: 750; font-size: 0.9375rem; line-height: 1.25; }
-.house-status { font-size: 0.8125rem; font-weight: 650; color: var(--paper-3); }
+.house-status { font-size: 0.8125rem; font-weight: 650; color: var(--paper-3); display: grid; gap: 2px; justify-items: center; }
+.house-status-primary { color: inherit; }
+.house-status-sign { font-size: 0.75rem; font-weight: 500; color: var(--paper-3); opacity: 0.78; }
 .house:hover .house-body { background: linear-gradient(180deg, #252c5c, #1b2046); }
 
 .house[data-status="ok"] .house-window { background: var(--porch-hi); box-shadow: 0 0 26px rgba(244, 181, 96, 0.35), 0 0 6px var(--porch); }

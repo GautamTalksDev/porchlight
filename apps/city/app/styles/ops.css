@@ -400,9 +400,18 @@
 .arrival[data-fall="true"] { border-color: rgba(196, 140, 255, 0.6); background: linear-gradient(180deg, rgba(40, 18, 60, 0.94), rgba(22, 10, 34, 0.94)); box-shadow: 0 0 0 6px rgba(196, 140, 255, 0.08), 0 24px 60px -16px rgba(170, 110, 255, 0.45); }
 .arrival[data-fall="true"] .arrival-beacon::before { background: #c48cff; box-shadow: 0 0 18px 2px rgba(196, 140, 255, 0.6); }
 .arrival[data-fall="true"] .arrival-beacon::after { border-color: #c48cff; }
+.arrival[data-answered="true"] {
+  border-color: rgba(158, 197, 255, 0.55);
+  background: linear-gradient(180deg, rgba(18, 28, 52, 0.94), rgba(12, 18, 36, 0.94));
+  box-shadow: 0 0 0 6px rgba(158, 197, 255, 0.1), 0 24px 60px -16px rgba(120, 170, 255, 0.4);
+}
+.arrival[data-answered="true"] .arrival-beacon::before { background: var(--moon); box-shadow: 0 0 18px 2px rgba(158, 197, 255, 0.55); }
+.arrival[data-answered="true"] .arrival-beacon::after { border-color: var(--moon); }
 .arrival-kicker { font-size: var(--fs-xs); font-weight: 700; color: var(--signal-hi); }
 .arrival[data-fall="true"] .arrival-kicker { color: #dcc2ff; }
+.arrival[data-answered="true"] .arrival-kicker { color: var(--moon); }
 .arrival-name { font-size: var(--fs-xl); font-weight: 780; letter-spacing: -0.02em; line-height: 1.1; }
+.arrival-detail { display: block; margin-top: 4px; font-size: var(--fs-sm); color: var(--paper-2); }
 .arrival-keys { grid-column: 2; display: flex; flex-wrap: wrap; gap: var(--s-3); font-size: var(--fs-xs); color: var(--paper-2); }
 .arrival-keys span { display: inline-flex; align-items: center; gap: 5px; }
 

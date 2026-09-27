@@ -10,6 +10,7 @@ import { isFall } from "@/lib/fall";
 import { formatJourneyBreadcrumb, journeyFromTrail, resolveNodeHouseholds, type JourneyHop } from "@/lib/journey";
 import { aliveTrailLabel, formatSignsOfLifeLine } from "@/lib/power";
 import { guidanceForNeeds } from "@/lib/needs-guidance";
+import { arrivalBannerCopy, journeyHasHeldHop, latestOmwActor, selectNewArrivals } from "@/lib/arrival";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { CommandMenu, JourneyChain, Vitals, type MenuGroup } from "./OpsParts";
@@ -105,6 +106,9 @@ interface Arrival {
   household: string;
   label: string;
   fall: boolean;
+  answered: boolean;
+  kicker: string;
+  detail: string | null;
 }
 
 export default function OpsRoom({
@@ -126,6 +130,7 @@ export default function OpsRoom({
   const [sessionEnded, setSessionEnded] = useState(false);
   const [arrival, setArrival] = useState<Arrival | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const [journeyPlay, setJourneyPlay] = useState<{ token: string; household: string } | null>(null);
   const [sound, setSound] = useState(true);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
@@ -334,35 +339,64 @@ export default function OpsRoom({
     [copilot.end, copilotBusy, copilotOpen, voice.start],
   );
 
-  // The arrival moment: a new call for help gets a chime, a banner, the camera, then the journey.
+  // The arrival moment: a new open or acknowledged call gets a chime, a banner, the camera, then the journey.
+  // Timers live in separate effects so live snapshots cannot cancel the hide / fresh / journey schedules.
   useEffect(() => {
     if (!snap) return;
     if (known.current === null) {
       known.current = new Set(snap.incidents.map((i) => i.key));
       return;
     }
-    const arrived = snap.incidents.filter((i) => i.status === "open" && !known.current!.has(i.key));
+    const arrived = selectNewArrivals(known.current, snap.incidents);
     for (const i of snap.incidents) known.current.add(i.key);
     if (!arrived.length) return;
     const first = arrived[0]!;
-    setArrival({ key: first.key, household: first.household, label: first.label, fall: isFall(first.note) });
+    const hops = journeyHopsFor(snap, first.household);
+    const copy = arrivalBannerCopy({
+      status: first.status === "acknowledged" ? "acknowledged" : "open",
+      fall: isFall(first.note ?? undefined),
+      heldDuringOutage: journeyHasHeldHop(hops),
+      latestOmwLabel: latestOmwActor(first.neighbourThread),
+    });
+    setArrival({
+      key: first.key,
+      household: first.household,
+      label: first.label,
+      fall: copy.answered ? false : isFall(first.note ?? undefined),
+      answered: copy.answered,
+      kicker: copy.kicker,
+      detail: copy.detail,
+    });
     setFresh(new Set(arrived.map((a) => a.key)));
     chime();
-    let journeyTimer: ReturnType<typeof setTimeout> | undefined;
     if (voice.state === "idle" || voice.state === "error") {
       setSelected(first.household);
       cityRef.current?.focus(first.household);
-      journeyTimer = setTimeout(() => playJourneyFor(first.household), 1700);
+      setJourneyPlay({ token: first.key, household: first.household });
     }
-    const t = setTimeout(() => setArrival(null), 7000);
-    const f = setTimeout(() => setFresh(new Set()), 4000);
-    return () => {
-      clearTimeout(t);
-      clearTimeout(f);
-      if (journeyTimer) clearTimeout(journeyTimer);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap]);
+
+  useEffect(() => {
+    if (!arrival) return;
+    const t = setTimeout(() => setArrival(null), 7000);
+    return () => clearTimeout(t);
+  }, [arrival?.key]);
+
+  const freshKey = useMemo(() => [...fresh].sort().join(","), [fresh]);
+  useEffect(() => {
+    if (!freshKey) return;
+    const t = setTimeout(() => setFresh(new Set()), 4000);
+    return () => clearTimeout(t);
+  }, [freshKey]);
+
+  useEffect(() => {
+    if (!journeyPlay) return;
+    const household = journeyPlay.household;
+    const t = setTimeout(() => playJourneyFor(household), 1700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [journeyPlay?.token]);
 
   // Selection. An empty string means "nothing selected on purpose".
   const selectedId = selected === "" ? null : selected ?? triage?.items[0]?.household ?? null;
@@ -740,7 +774,7 @@ export default function OpsRoom({
           ) : null}
         </section>
         <div className="ops-scrim" aria-hidden="true" />
-        {arrival ? <div key={arrival.key} className="veil" aria-hidden="true" /> : null}
+        {arrival && !arrival.answered ? <div key={arrival.key} className="veil" aria-hidden="true" /> : null}
 
         <header className="cmd">
           <Brand href="/" />
@@ -1267,6 +1301,7 @@ export default function OpsRoom({
                 type="button"
                 className="arrival"
                 data-fall={String(arrival.fall)}
+                data-answered={String(arrival.answered)}
                 onClick={() => choose(arrival.household)}
                 role="alert"
                 aria-live="assertive"
@@ -1277,8 +1312,9 @@ export default function OpsRoom({
               >
                 <span className="arrival-beacon" aria-hidden="true" />
                 <span>
-                  <span className="arrival-kicker">{arrival.fall ? "Possible fall detected" : "New call for help"}</span>
+                  <span className="arrival-kicker">{arrival.kicker}</span>
                   <span className="arrival-name" style={{ display: "block" }}>{arrival.label}</span>
+                  {arrival.detail ? <span className="arrival-detail">{arrival.detail}</span> : null}
                 </span>
                 <span className="arrival-keys">
                   {guidanceForNeeds((snap?.households.find((h) => h.id === arrival.household)?.needs ?? []).map((n) => n.id)).voiceCallSuitable ? (

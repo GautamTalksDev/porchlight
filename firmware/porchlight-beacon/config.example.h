@@ -47,3 +47,5 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 #define LIGHT_DARK 1
 // Floor for lit level and adaptive bright threshold: bright when reading >= max(LIGHT_BRIGHT, 30 percent of lit level).
 #define LIGHT_BRIGHT 3
+// How long the green "help is on the way" light stays on after an acknowledgement, then return to idle (seconds).
+#define ACK_GREEN_SEC 90

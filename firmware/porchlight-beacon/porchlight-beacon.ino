@@ -52,6 +52,10 @@
 // Floor for lit level and adaptive bright threshold: bright when reading >= max(LIGHT_BRIGHT, 30 percent of lit level).
 #define LIGHT_BRIGHT 3
 #endif
+#ifndef ACK_GREEN_SEC
+// How long the green "help is on the way" light stays on after an acknowledgement, then return to idle (seconds).
+#define ACK_GREEN_SEC 90
+#endif
 #ifndef CAMERA_TOO_DARK
 // Mean grayscale below this (0 to 255) is too dark to judge presence.
 #define CAMERA_TOO_DARK 18
@@ -242,6 +246,7 @@ void transmit(const uint8_t *frame) {
 }
 
 void sendKind(uint8_t kind) {
+  ffRemaining = 0; // drop any pending older fire-and-forget frame so its counter is never resent
   counter++;
   pl::encodeFrame(BEACON_ID, BEACON_KEY, kind, session, counter, lastFrame);
   transmit(lastFrame);
@@ -290,7 +295,7 @@ void handleAck(const uint8_t *data, size_t len) {
   }
   pendingHelpCounter = 0;
   led = Led::Acked;
-  ledUntil = millis() + 15000;
+  ledUntil = millis() + (unsigned long)ACK_GREEN_SEC * 1000UL;
   Serial.println("PLI ack accepted: a neighbour is on the way");
 }
 
@@ -694,7 +699,8 @@ PresenceVerdict runPresenceCheck() {
 }
 
 bool presenceIdleOk() {
-  if (pendingHelpCounter) return false;
+  // Presence may run while an alert waits for an acknowledgement; never during a fall
+  // countdown or while the button is held, and never delaying alert resends.
   if (buttonDown()) return false;
 #if FALL_DETECTION
   if (fallPhase != FallPhase::Idle) return false;
@@ -945,14 +951,11 @@ void setup() {
 }
 
 #if LIGHT_SENSING
-/** When a node connects, re-send the known light state once (fire-and-forget can be lost while alone). */
+/** When a node connects, re-send the known light state once (fresh counter, same path as other frames). */
 void announceLightStateOnConnect() {
   if (lightState == LightState::Unknown) return;
-  const uint8_t kind = lightState == LightState::Dark ? pl::KIND_LIGHTS_OFF : pl::KIND_LIGHTS_ON;
-  counter++;
-  uint8_t frame[pl::FRAME_LEN];
-  pl::encodeFrame(BEACON_ID, BEACON_KEY, kind, session, counter, frame);
-  transmit(frame);
+  ffRemaining = 0; // cancel any pending older frame before taking a new counter
+  sendFireAndForget(lightState == LightState::Dark ? pl::KIND_LIGHTS_OFF : pl::KIND_LIGHTS_ON);
   Serial.println(lightState == LightState::Dark ? "PLI lights off (on connect)" : "PLI lights on (on connect)");
 }
 #endif
