@@ -14,16 +14,53 @@
   The alert is re-sent every few seconds until a neighbour acknowledges it, so a node that
   comes into range later still hears it. Nodes discard the repeats as duplicates.
 
+  Signs of life (optional): moved, lights on/off, and camera presence by frame difference.
+  Presence never stores or sends an image, only a yes or no.
+
   Library: ArduinoBLE (Library Manager). Board: Arduino Mbed OS Nano Boards > Nano 33 BLE.
-  Optional: Arduino_LSM9DS1 when FALL_DETECTION is on.
+  Optional: Arduino_LSM9DS1, Arduino_APDS9960, TinyMLShield when the matching flags are on.
 */
 #include <ArduinoBLE.h>
 #include "config.h"
 #include "frame.h"
 
-#if FALL_DETECTION
+#ifndef FALL_DETECTION
+#define FALL_DETECTION 0
+#endif
+#ifndef CAMERA_PRESENCE
+#define CAMERA_PRESENCE 0
+#endif
+#ifndef LIGHT_SENSING
+#define LIGHT_SENSING 0
+#endif
+#ifndef ALIVE_REPORTS
+#define ALIVE_REPORTS 0
+#endif
+#ifndef ALIVE_EVERY_SEC
+#define ALIVE_EVERY_SEC 20
+#endif
+#ifndef PRESENCE_EVERY_SEC
+#define PRESENCE_EVERY_SEC 10
+#endif
+#ifndef LIGHT_DARK
+#define LIGHT_DARK 20
+#endif
+#ifndef LIGHT_BRIGHT
+#define LIGHT_BRIGHT 60
+#endif
+
+#if FALL_DETECTION || ALIVE_REPORTS
 #include <Arduino_LSM9DS1.h>
 #include <math.h>
+#endif
+
+#if LIGHT_SENSING
+#include <Arduino_APDS9960.h>
+#endif
+
+#if CAMERA_PRESENCE
+// Same shield header and camera modes as firmware/vendor/person_detection/arduino_image_provider.cpp.
+#include <TinyMLShield.h>
 #endif
 
 #if defined(ARDUINO_ARCH_MBED) || defined(NRF52840_XXAA)
@@ -34,10 +71,6 @@
 
 #ifndef BUTTON_SHIELD_MODE
 #define BUTTON_SHIELD_MODE 1
-#endif
-
-#ifndef FALL_DETECTION
-#define FALL_DETECTION 0
 #endif
 
 static const char *SERVICE_UUID = "7a1f0001-5c3e-4f6b-9d2a-6c1e0b8f4a10";
@@ -52,21 +85,57 @@ uint32_t session = 0;
 uint32_t counter = 0;
 uint8_t lastFrame[pl::FRAME_LEN];
 uint8_t helpFrame[pl::FRAME_LEN];  // the pending help or fall alert, kept separate so a test frame can't replace it
+uint8_t ffFrame[pl::FRAME_LEN];    // fire-and-forget signs-of-life frame (sent twice, one second apart)
 uint32_t pendingHelpCounter = 0;  // 0 = nothing pending
 unsigned long pendingSince = 0;
 unsigned long lastSendAt = 0;
 unsigned long ledUntil = 0;
 Led led = Led::Off;
 bool everDelivered = false;
+uint8_t ffRemaining = 0;
+unsigned long ffNextAt = 0;
+
+bool buttonDown();
+
+#if FALL_DETECTION || ALIVE_REPORTS
+bool imuReady = false;
+#endif
 
 #if FALL_DETECTION
 enum class FallPhase { Idle, Freefall, Impact, Stillness, Countdown };
 FallPhase fallPhase = FallPhase::Idle;
-bool imuReady = false;
 unsigned long fallPhaseAt = 0;
 unsigned long freefallLowAt = 0;
 bool fallCancelSwallow = false;
 bool fallCountdownPrinted = false;
+#endif
+
+#if ALIVE_REPORTS
+bool movedMarked = false;
+bool presenceMarked = false;
+uint8_t movedSamples = 0;
+unsigned long lastAliveReportAt = 0;
+#endif
+
+#if LIGHT_SENSING
+enum class LightState { Unknown, Dark, Bright };
+bool apdsReady = false;
+LightState lightState = LightState::Unknown;
+LightState lightCandidate = LightState::Unknown;
+unsigned long lightCandidateSince = 0;
+unsigned long lastLightReadAt = 0;
+#endif
+
+#if CAMERA_PRESENCE
+// QCIF grayscale, same size as the vendor GetImage receive buffer (176 * 144).
+static uint8_t camFrame[176 * 144];
+static uint8_t prevGrid[64];
+static uint8_t currGrid[64];
+static bool havePrevGrid = false;
+static bool cameraReady = false;
+static bool cameraFailed = false;
+static bool cameraFailPrinted = false;
+static unsigned long lastPresenceAt = 0;
 #endif
 
 // LED (the Nano 33 BLE RGB LED is active LOW)
@@ -153,6 +222,23 @@ void sendKind(uint8_t kind) {
   }
 }
 
+// Fire-and-forget: send once now, again one second later. No ack, no LED change.
+void sendFireAndForget(uint8_t kind) {
+  if (ffRemaining) return;
+  counter++;
+  pl::encodeFrame(BEACON_ID, BEACON_KEY, kind, session, counter, ffFrame);
+  transmit(ffFrame);
+  ffRemaining = 1;
+  ffNextAt = millis() + 1000;
+}
+
+void pollFireAndForget() {
+  if (!ffRemaining) return;
+  if (millis() < ffNextAt) return;
+  transmit(ffFrame);
+  ffRemaining -= 1;
+}
+
 // Receiving an acknowledgement
 
 void handleAck(const uint8_t *data, size_t len) {
@@ -199,7 +285,18 @@ void cancelFallCountdown() {
   led = Led::OkFlash;
   ledUntil = millis() + 1500;
 }
+#endif
 
+#if ALIVE_REPORTS
+void noteMotionSample(float mag) {
+  if (fabsf(mag - 1.0f) > 0.15f) {
+    if (movedSamples < 255) movedSamples += 1;
+    if (movedSamples >= 3) movedMarked = true;
+  }
+}
+#endif
+
+#if FALL_DETECTION
 void pollFall() {
   const unsigned long t = millis();
 
@@ -241,6 +338,9 @@ void pollFall() {
     float x = 0, y = 0, z = 0;
     IMU.readAcceleration(x, y, z);
     mag = sqrtf(x * x + y * y + z * z);
+#if ALIVE_REPORTS
+    noteMotionSample(mag);
+#endif
   }
 
   switch (fallPhase) {
@@ -280,12 +380,159 @@ void pollFall() {
       break;
   }
 }
+#elif ALIVE_REPORTS
+void pollMotionOnly() {
+  if (!imuReady) return;
+  if (!IMU.accelerationAvailable()) return;
+  float x = 0, y = 0, z = 0;
+  IMU.readAcceleration(x, y, z);
+  noteMotionSample(sqrtf(x * x + y * y + z * z));
+}
+#endif
+
+#if LIGHT_SENSING
+void pollLight() {
+  if (!apdsReady) return;
+  const unsigned long t = millis();
+  if (t - lastLightReadAt < 2000) return;
+  lastLightReadAt = t;
+  if (!APDS.colorAvailable()) return;
+  int r = 0, g = 0, b = 0, clear = 0;
+  APDS.readColor(r, g, b, clear);
+
+  LightState next = lightState;
+  if (clear < LIGHT_DARK) next = LightState::Dark;
+  else if (clear > LIGHT_BRIGHT) next = LightState::Bright;
+
+  if (next == lightState || next == LightState::Unknown) {
+    lightCandidate = LightState::Unknown;
+    return;
+  }
+  if (lightCandidate != next) {
+    lightCandidate = next;
+    lightCandidateSince = t;
+    return;
+  }
+  if (t - lightCandidateSince < 5000) return;
+  lightState = next;
+  lightCandidate = LightState::Unknown;
+  sendFireAndForget(next == LightState::Dark ? pl::KIND_LIGHTS_OFF : pl::KIND_LIGHTS_ON);
+  Serial.println(next == LightState::Dark ? "PLI lights off" : "PLI lights on");
+}
+
+int readLightClear() {
+  if (!apdsReady) return -1;
+  if (!APDS.colorAvailable()) return -1;
+  int r = 0, g = 0, b = 0, clear = 0;
+  APDS.readColor(r, g, b, clear);
+  return clear;
+}
+#endif
+
+#if CAMERA_PRESENCE
+// Mirrors vendor GetImage: Camera.begin(QCIF, GRAYSCALE, 5, OV7675) then Camera.readFrame.
+bool ensureCamera() {
+  if (cameraReady) return true;
+  if (cameraFailed) return false;
+  // Lazy start, same as arduino_image_provider.cpp (not in setup: that froze on this board).
+  if (!Camera.begin(QCIF, GRAYSCALE, 5, OV7675)) {
+    cameraFailed = true;
+    if (!cameraFailPrinted) {
+      Serial.println("PLI camera not available, presence off");
+      cameraFailPrinted = true;
+    }
+    return false;
+  }
+  cameraReady = true;
+  return true;
+}
+
+void averageGrid(const uint8_t *frame, uint8_t *grid) {
+  const int W = 176;
+  const int H = 144;
+  const int BW = 8;
+  const int BH = 8;
+  const int blockW = W / BW;
+  const int blockH = H / BH;
+  for (int by = 0; by < BH; by += 1) {
+    for (int bx = 0; bx < BW; bx += 1) {
+      uint32_t sum = 0;
+      const int y0 = by * blockH;
+      const int x0 = bx * blockW;
+      for (int y = 0; y < blockH; y += 1) {
+        const uint8_t *row = frame + (y0 + y) * W + x0;
+        for (int x = 0; x < blockW; x += 1) sum += row[x];
+      }
+      grid[by * BW + bx] = (uint8_t)(sum / (uint32_t)(blockW * blockH));
+    }
+  }
+}
+
+// Returns true if presence was detected. Never prints or returns pixel data.
+bool runPresenceCheck() {
+  if (!ensureCamera()) return false;
+  Camera.readFrame(camFrame);
+  averageGrid(camFrame, currGrid);
+  if (!havePrevGrid) {
+    memcpy(prevGrid, currGrid, sizeof(prevGrid));
+    havePrevGrid = true;
+    return false;
+  }
+  int changed = 0;
+  for (int i = 0; i < 64; i += 1) {
+    int d = (int)currGrid[i] - (int)prevGrid[i];
+    if (d < 0) d = -d;
+    if (d > 12) changed += 1;
+  }
+  memcpy(prevGrid, currGrid, sizeof(prevGrid));
+  // At least 6 percent of 64 blocks: 4 or more.
+  return changed * 100 >= 6 * 64;
+}
+
+bool presenceIdleOk() {
+  if (pendingHelpCounter) return false;
+  if (buttonDown()) return false;
+#if FALL_DETECTION
+  if (fallPhase != FallPhase::Idle) return false;
+#endif
+  return true;
+}
+
+void pollPresence() {
+  if (cameraFailed) return;
+  const unsigned long t = millis();
+  if (t - lastPresenceAt < (unsigned long)PRESENCE_EVERY_SEC * 1000UL) return;
+  if (!presenceIdleOk()) return;
+  lastPresenceAt = t;
+  if (runPresenceCheck()) {
+#if ALIVE_REPORTS
+    presenceMarked = true;
+#endif
+  }
+}
+#endif
+
+#if ALIVE_REPORTS
+void pollAliveReport() {
+  const unsigned long t = millis();
+  if (t - lastAliveReportAt < (unsigned long)ALIVE_EVERY_SEC * 1000UL) return;
+  lastAliveReportAt = t;
+  if (!movedMarked && !presenceMarked) return;
+  const uint8_t kind = movedMarked ? pl::KIND_MOVED : pl::KIND_PRESENCE;
+  sendFireAndForget(kind);
+  Serial.println(movedMarked ? "PLI moved" : "PLI presence");
+  movedMarked = false;
+  presenceMarked = false;
+  movedSamples = 0;
+}
 #endif
 
 // Serial commands (USB mode and bench testing):
 //   PLA1 <36 hex>  authenticated ack from the node
 //   PLH            simulate a help press      PLO  simulate "I'm safe"      PLT  test frame
 //   PLX            jump to fall countdown (bench test, no drop needed)
+//   PLL            print the current ambient light level
+//   PLP            run one presence check now (prints yes or no, never pixels)
 void pollSerial() {
   static char line[64];
   static size_t n = 0;
@@ -316,6 +563,17 @@ void pollSerial() {
 #if FALL_DETECTION
     } else if (strcmp(line, "PLX") == 0) {
       enterFallCountdown();
+#endif
+#if LIGHT_SENSING
+    } else if (strcmp(line, "PLL") == 0) {
+      const int clear = readLightClear();
+      Serial.print("PLI light ");
+      Serial.println(clear);
+#endif
+#if CAMERA_PRESENCE
+    } else if (strcmp(line, "PLP") == 0) {
+      const bool yes = runPresenceCheck();
+      Serial.println(yes ? "PLI presence yes" : "PLI presence no");
 #endif
     }
   }
@@ -413,14 +671,25 @@ void setup() {
     BLE.advertise();
   }
 
-#if FALL_DETECTION
+#if FALL_DETECTION || ALIVE_REPORTS
   if (IMU.begin()) {
     imuReady = true;
   } else {
     imuReady = false;
-    Serial.println("PLI motion sensor not found, fall detection off");
+    Serial.println("PLI motion sensor not found, fall detection and move reports off");
   }
 #endif
+
+#if LIGHT_SENSING
+  if (APDS.begin()) {
+    apdsReady = true;
+  } else {
+    apdsReady = false;
+    Serial.println("PLI light sensor not found, lights reports off");
+  }
+#endif
+
+  // Camera is started lazily on first presence check (vendor pattern in arduino_image_provider.cpp).
 
   Serial.print("PLI Porchlight beacon ");
   Serial.print(BEACON_ID);
@@ -428,14 +697,36 @@ void setup() {
   Serial.println(session, HEX);
   Serial.print("PLI button pin reads ");
   Serial.println(buttonDown() ? "pressed (if you are not pressing it, see docs/HARDWARE.md)" : "released");
+
+#if ALIVE_REPORTS
+  lastAliveReportAt = millis();
+#endif
+#if CAMERA_PRESENCE
+  lastPresenceAt = millis();
+#endif
+#if LIGHT_SENSING
+  lastLightReadAt = millis();
+#endif
 }
 
 void loop() {
   BLE.poll();
   pollButton();
   pollSerial();
+  pollFireAndForget();
 #if FALL_DETECTION
   pollFall();
+#elif ALIVE_REPORTS
+  pollMotionOnly();
+#endif
+#if LIGHT_SENSING
+  pollLight();
+#endif
+#if CAMERA_PRESENCE
+  pollPresence();
+#endif
+#if ALIVE_REPORTS
+  pollAliveReport();
 #endif
 
   // Keep re-sending an unacknowledged help or fall alert so a node that connects later still hears it.

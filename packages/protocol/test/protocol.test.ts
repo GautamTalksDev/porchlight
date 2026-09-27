@@ -162,6 +162,19 @@ describe("beacon frames", () => {
       assert.equal(r.frame.incident, "pl-b01:12340001:3");
     }
   });
+  it("signs-of-life kinds 5 to 8 round-trip and authenticate", () => {
+    const kinds = ["moved", "lights_on", "lights_off", "presence"] as const;
+    for (let i = 0; i < kinds.length; i += 1) {
+      const kind = kinds[i]!;
+      const f = encodeFrame("pl-b01", key, kind, 0xabc10000 + i, 10 + i);
+      const r = decodeFrame("pl-b01", key, f);
+      assert.equal(r.ok, true, kind);
+      if (r.ok) {
+        assert.equal(r.frame.kind, kind);
+        assert.equal(f[1], 5 + i);
+      }
+    }
+  });
   it("rejects a frame with a flipped bit", () => {
     const f = encodeFrame("pl-b01", key, "help", 1, 1);
     f[6] = f[6]! ^ 0x01;

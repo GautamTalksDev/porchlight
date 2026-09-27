@@ -24,3 +24,18 @@ static const uint8_t BEACON_KEY[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 
 // Automatic fall detection with the on-board motion sensor. 1 = on, 0 = off.
 #define FALL_DETECTION 1
+
+// Signs of life: camera presence by frame difference (demo). 1 = on, 0 = off.
+#define CAMERA_PRESENCE 1
+// Signs of life: ambient light on/off via the APDS9960 (demo). 1 = on, 0 = off.
+#define LIGHT_SENSING 1
+// Signs of life: periodic moved/presence reports (demo). 1 = on, 0 = off.
+#define ALIVE_REPORTS 1
+// How often to send a moved or presence frame if one was marked (demo 20 s; real deploys use minutes).
+#define ALIVE_EVERY_SEC 20
+// How often to capture a presence frame when idle (demo 10 s; real deploys use minutes).
+#define PRESENCE_EVERY_SEC 10
+// Ambient clear channel below this is dark (hysteresis with LIGHT_BRIGHT).
+#define LIGHT_DARK 20
+// Ambient clear channel above this is bright (hysteresis with LIGHT_DARK).
+#define LIGHT_BRIGHT 60

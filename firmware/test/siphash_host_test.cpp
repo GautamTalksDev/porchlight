@@ -39,6 +39,21 @@ int main() {
   frame[7] ^= 1;
   if (pl::verifyFrame("pl-b01", k2, frame, pl::FRAME_LEN, pl::KIND_HELP, &s, &c)) { printf("FAIL tampered frame accepted\n"); fails++; }
 
+  const uint8_t aliveKinds[] = {pl::KIND_MOVED, pl::KIND_LIGHTS_ON, pl::KIND_LIGHTS_OFF, pl::KIND_PRESENCE};
+  for (size_t i = 0; i < sizeof(aliveKinds); i++) {
+    pl::encodeFrame("pl-b01", k2, aliveKinds[i], 0x55aa0000u + (uint32_t)i, 20 + (uint32_t)i, frame);
+    if (!pl::verifyFrame("pl-b01", k2, frame, pl::FRAME_LEN, aliveKinds[i], &s, &c) ||
+        s != 0x55aa0000u + (uint32_t)i || c != 20 + (uint32_t)i) {
+      printf("FAIL alive kind %u round-trip\n", (unsigned)aliveKinds[i]);
+      fails++;
+    }
+    frame[10] ^= 1;
+    if (pl::verifyFrame("pl-b01", k2, frame, pl::FRAME_LEN, aliveKinds[i], &s, &c)) {
+      printf("FAIL alive kind %u accepted a bad MAC\n", (unsigned)aliveKinds[i]);
+      fails++;
+    }
+  }
+
   printf(fails ? "FAILED\n" : "ALL OK\n");
   return fails ? 1 : 0;
 }

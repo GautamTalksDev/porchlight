@@ -29,6 +29,31 @@ When fall detection is on (`FALL_DETECTION 1` in `config.h`), the on-board motio
 
 You can exercise the countdown without dropping the board by typing `PLX` in the Serial Monitor.
 
+## Signs of life
+
+When the matching flags are on in `config.h`, the beacon also reports quiet signals that a home is occupied and that lights changed. These are fire-and-forget frames: sent twice, one second apart, with no acknowledgement and no LED change.
+
+| Signal | Frame kind | How it is decided |
+| - | - | - |
+| Moved | 5 `moved` | Acceleration differs from 1 g by more than 0.15 g for at least three samples since the last report |
+| Lights | 6 `lights_on` / 7 `lights_off` | Ambient clear channel from the APDS9960 crosses `LIGHT_DARK` / `LIGHT_BRIGHT` and stays there for 5 seconds |
+| Presence | 8 `presence` | Every `PRESENCE_EVERY_SEC`, when idle, one grayscale frame is reduced to an 8 by 8 grid and compared with the previous grid; at least 6 percent of blocks changed by more than 12 levels |
+
+**Privacy promise.** The camera image never leaves the chip. No pixels are printed, stored for upload, or sent over Bluetooth. Only a yes or no (a `presence` frame) goes to the node.
+
+**Honest limits.** The camera needs some light in the room; a dark room will not show presence. The light sensor means the room got brighter or darker, not that the grid is powered. Demo intervals are short (`ALIVE_EVERY_SEC` 20, `PRESENCE_EVERY_SEC` 10); a real deployment would use minutes.
+
+Fall detection and an unacknowledged help alert always win: presence capture does not run during a fall countdown or while help is waiting for an ack.
+
+Calibration commands in the Serial Monitor:
+
+| Command | Does |
+| - | - |
+| `PLL` | Prints the current ambient light clear channel (`PLI light <n>`) |
+| `PLP` | Runs one presence check now and prints `PLI presence yes` or `PLI presence no` (never pixel data) |
+
+Libraries for signs of life: **Arduino_LSM9DS1** (motion), **Arduino_APDS9960** (light), **ArduinoBLE** (already required), and **TinyMLShield** (camera, same start path as the kit's person_detection example).
+
 ## Set up the Arduino IDE (once per laptop)
 
 1. Install the [Arduino IDE 2](https://www.arduino.cc/en/software).
@@ -79,6 +104,8 @@ You can always test without the button by typing into the Serial Monitor:
 | `PLO` | Sends "I'm safe" |
 | `PLT` | Sends a test frame |
 | `PLX` | Starts the fall countdown (bench test, no drop needed) |
+| `PLL` | Prints the current ambient light level |
+| `PLP` | Runs one presence check and prints yes or no |
 
 ## Connect it to a node
 

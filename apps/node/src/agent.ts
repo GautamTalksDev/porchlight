@@ -242,7 +242,8 @@ export class NodeAgent {
     }
     if (verdict !== "accept") return fail(verdict, verdict === "duplicate" ? 200 : 429);
     state.lastResult = `accepted ${f.kind}`;
-    if (f.kind === "test") {
+    // Test and signs-of-life frames are fire-and-forget: accept, do not open an incident.
+    if (f.kind === "test" || f.kind === "moved" || f.kind === "lights_on" || f.kind === "lights_off" || f.kind === "presence") {
       this.changed();
       return { ok: true, eventId: "", kind: "test", incident: f.incident, household };
     }
