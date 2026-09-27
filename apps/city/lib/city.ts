@@ -26,6 +26,8 @@ import { withoutBroadcastHousehold } from "./street-households";
 export interface NodeSeen {
   id: string;
   name: string;
+  /** Household this node reported from ingest (NODE_HOUSEHOLD). */
+  household: string | null;
   lastSeenAt: number;
   delivered: number;
 }
@@ -125,7 +127,7 @@ function knownNoticeIds(c: CityState): Set<string> {
  * Tiger Data before it is acknowledged, so a node only forgets an event once it is durable here.
  */
 export async function ingest(
-  node: { id: string; name: string },
+  node: { id: string; name: string; household?: string },
   raw: unknown[],
   heldNoticeIds: string[] = [],
 ): Promise<IngestResult> {
@@ -165,10 +167,11 @@ export async function ingest(
     result.accepted.push(ev.id);
     delivered.push(ev);
   }
-  const seen = c.nodes.get(node.id) ?? { id: node.id, name: node.name, lastSeenAt: 0, delivered: 0 };
+  const seen = c.nodes.get(node.id) ?? { id: node.id, name: node.name, household: null, lastSeenAt: 0, delivered: 0 };
   seen.lastSeenAt = Date.now();
   seen.delivered += result.accepted.length;
   seen.name = node.name;
+  if (node.household) seen.household = node.household;
   c.nodes.set(node.id, seen);
   recordNoticeConfirmations(c.noticeConfirmations, node.id, heldNoticeIds, knownNoticeIds(c));
   if (dbEnabled() && (raw.length || result.rejected.length)) {
@@ -379,7 +382,21 @@ export async function snapshot() {
   // Provenance for each home: who signed each event, how it reached the city, newest first.
   const nameOf = new Map([...c.nodes.values()].map((n) => [n.id, n.name]));
   const cityId = cityIdentity().identity.id;
-  const trail: Record<string, { id: string; kind: string; at: number; by: string; via: string | null; source: string; beacon: string | null; note: string | null }[]> = {};
+  const trail: Record<
+    string,
+    {
+      id: string;
+      kind: string;
+      at: number;
+      by: string;
+      via: string | null;
+      source: string;
+      beacon: string | null;
+      note: string | null;
+      heldMs: number;
+      eventId: string;
+    }[]
+  > = {};
   for (const e of events) {
     if (!isStreetHousehold(e.household)) continue;
     const list = (trail[e.household] ??= []);
@@ -388,8 +405,10 @@ export async function snapshot() {
       const label = REPLY_LABELS[e.reply];
       note = e.note ? `${label}. ${e.note}` : label;
     }
+    const received = c.receivedAt.get(e.id) ?? now;
     list.push({
       id: e.id.slice(0, 10),
+      eventId: e.id,
       kind: e.kind,
       at: decodeHlc(e.hlc).wall,
       by: e.origin === cityId ? "the city" : nameOf.get(e.origin) ?? `node ${e.origin.slice(0, 6)}`,
@@ -397,6 +416,7 @@ export async function snapshot() {
       source: e.source.type,
       beacon: e.source.beacon ?? null,
       note,
+      heldMs: Math.max(0, received - decodeHlc(e.hlc).wall),
     });
   }
   for (const k of Object.keys(trail)) trail[k] = trail[k]!.sort((a, b) => b.at - a.at).slice(0, 8);
@@ -422,6 +442,11 @@ export async function snapshot() {
     totalNodes: n.totalNodes,
   }));
 
+  const nodeHouseholds: Record<string, string> = { ...reg.nodes };
+  for (const n of c.nodes.values()) {
+    if (n.household) nodeHouseholds[n.name] = n.household;
+  }
+
   return {
     generatedAt: now,
     outage: c.outage,
@@ -432,8 +457,12 @@ export async function snapshot() {
     counts: { events: events.length, open: incidents.filter((i) => i.status !== "resolved").length },
     households,
     incidents,
-    nodes: [...c.nodes.values()].map((n) => ({ ...n, houseId: reg.nodes[n.name] ?? null })),
+    nodes: [...c.nodes.values()].map((n) => ({
+      ...n,
+      houseId: n.household ?? reg.nodes[n.name] ?? null,
+    })),
     nodeHouses: reg.nodes,
+    nodeHouseholds,
     timeline: tl,
     holdSeconds: hold,
     noticeDelivery,

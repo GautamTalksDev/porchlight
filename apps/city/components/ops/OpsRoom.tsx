@@ -6,6 +6,7 @@ import { Brand } from "@/components/ui/Brand";
 import type { CityMessage, CitySnapshot } from "@/lib/city";
 import type { PorchlightCity } from "@/lib/city/scene";
 import { isFall } from "@/lib/fall";
+import { buildJourney, formatJourneyBreadcrumb, type JourneyHop } from "@/lib/journey";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { useCopilot } from "./useCopilot";
@@ -13,6 +14,28 @@ import { useVoiceCall } from "./useVoiceCall";
 import { NoticesPanel, type NoticesApi } from "./NoticesPanel";
 import type { CopilotLive } from "./useCopilot";
 import { summarizePreflight, type PreflightCheck } from "@/lib/preflight";
+
+/** Build journey hops for a home from the latest help trail entry. */
+function journeyHopsFor(snap: CitySnapshot, householdId: string): JourneyHop[] {
+  const house = snap.households.find((h) => h.id === householdId);
+  if (!house) return [];
+  const entries = snap.trail[householdId] ?? [];
+  const help = entries.find((t) => t.kind === "help") ?? entries[0];
+  if (!help) return [];
+  const originNode = help.by === "the city" ? null : help.by;
+  const deliveredBy = help.via ?? originNode;
+  const householdLabels: Record<string, string> = {};
+  for (const h of snap.households) householdLabels[h.id] = h.label;
+  return buildJourney({
+    event: { household: householdId, source: { type: help.source } },
+    householdLabel: house.label,
+    originNode,
+    deliveredBy,
+    heldMs: help.heldMs,
+    nodeHouseholds: snap.nodeHouseholds ?? {},
+    householdLabels,
+  });
+}
 
 const STATUS_TEXT: Record<string, string> = { unknown: "Not heard from", ok: "Safe", help: "Needs help", acknowledged: "Help on the way" };
 const ACTION_TEXT: Record<string, string> = { dispatch_neighbour: "Suggested: dispatch now", voice_check_in: "Suggested: call first", monitor: "Suggested: keep watching" };
@@ -233,11 +256,20 @@ export default function OpsRoom({
     cityRef.current?.focus(id);
   }, []);
 
+  const playJourneyFor = useCallback((householdId: string) => {
+    const live = snapRef.current;
+    if (!live) return;
+    const hops = journeyHopsFor(live, householdId);
+    if (!hops.length) return;
+    cityRef.current?.playJourney(hops);
+  }, []);
+
   const copilot = useCopilot({
     liveRef,
     noticesApiRef,
     onSelect: choose,
     onFocus: (target) => cityRef.current?.focus(target),
+    onPlayJourney: playJourneyFor,
     onStartCheckIn: (householdId, incidentKey) => {
       void voice.start(householdId, incidentKey);
     },
@@ -262,7 +294,7 @@ export default function OpsRoom({
     [copilot.end, copilotBusy, copilotOpen, voice.start],
   );
 
-  // The arrival moment: a new call for help gets a chime, a banner, and the camera.
+  // The arrival moment: a new call for help gets a chime, a banner, the camera, then the journey.
   useEffect(() => {
     if (!snap) return;
     if (known.current === null) {
@@ -276,15 +308,18 @@ export default function OpsRoom({
     setArrival({ key: first.key, household: first.household, label: first.label, fall: isFall(first.note) });
     setFresh(new Set(arrived.map((a) => a.key)));
     chime();
+    let journeyTimer: ReturnType<typeof setTimeout> | undefined;
     if (voice.state === "idle" || voice.state === "error") {
       setSelected(first.household);
       cityRef.current?.focus(first.household);
+      journeyTimer = setTimeout(() => playJourneyFor(first.household), 1700);
     }
     const t = setTimeout(() => setArrival(null), 7000);
     const f = setTimeout(() => setFresh(new Set()), 4000);
     return () => {
       clearTimeout(t);
       clearTimeout(f);
+      if (journeyTimer) clearTimeout(journeyTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap]);
@@ -298,6 +333,11 @@ export default function OpsRoom({
       .sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1))[0] ?? null;
   const ranked = triage?.items.find((r) => r.household === selectedId) ?? null;
   const trail = (selectedId && snap?.trail[selectedId]) || [];
+  const journeyHops = useMemo(
+    () => (selectedId && snap ? journeyHopsFor(snap, selectedId) : []),
+    [selectedId, snap],
+  );
+  const journeyCrumb = journeyHops.length ? formatJourneyBreadcrumb(journeyHops) : "";
 
   useEffect(() => {
     cityRef.current?.select(selectedId);
@@ -911,6 +951,19 @@ export default function OpsRoom({
                 ) : null}
                 {voice.state !== "idle" && voice.state !== "error" ? <button className="btn btn-quiet btn-small" type="button" onClick={voice.end}>End call</button> : null}
               </section>
+              {journeyCrumb ? (
+                <section className="journey-panel" aria-labelledby="journey-h">
+                  <h3 id="journey-h" className="section-title">The call's journey</h3>
+                  <p className="journey-crumb">{journeyCrumb}</p>
+                  <button
+                    className="btn btn-quiet btn-small"
+                    type="button"
+                    onClick={() => selectedId && playJourneyFor(selectedId)}
+                  >
+                    Replay how this reached us
+                  </button>
+                </section>
+              ) : null}
               {trail.length ? (
                 <section className="trail" aria-labelledby="trail-h">
                   <h3 id="trail-h" className="section-title">How this reached you</h3>

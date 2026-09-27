@@ -34,6 +34,8 @@ flowchart LR
 
 **1:50 The link returns.** Click **End the outage**. Alerts fly from the node homes to City Hall. The queue ranks everyone: "Gemini only sees anonymous references and needs. It suggests; a coordinator decides."
 
+**1:55 The call's journey.** Simulate city outage, press the beacon, restore, and the journey shows the pause at the neighbour's house. A glowing pulse hops home to home to City Hall; the detail panel lists the same path and offers **Replay how this reached us**.
+
 **2:20 The voice call.** Select 12 Maple Crescent and click **Call in English**. A teammate answers in English and says she is fine. The agent uses its `mark_safe` tool, the transcript shows it, and her house turns amber. To show bilingual support, answer in French and the agent switches, or call 7 Elm Court, which is set to French.
 
 **2:35 Hey Porchlight.** Press **V** or click **Talk to Porchlight**. Ask “who needs help?” then “show Maple” and “dispatch Maple”. The floating panel shows the tool lines, the camera flies to the home, and the dispatch appears on the signed log. End the copilot before any resident call; they never run at the same time.

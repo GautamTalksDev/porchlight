@@ -397,7 +397,11 @@ export class NodeAgent {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.config.cityToken}` },
         body: JSON.stringify({
-          node: { id: this.identity.id, name: this.config.name },
+          node: {
+            id: this.identity.id,
+            name: this.config.name,
+            ...(this.config.household ? { household: this.config.household } : {}),
+          },
           events: pending,
           heldNotices,
         }),

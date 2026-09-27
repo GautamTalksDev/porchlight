@@ -99,6 +99,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .city-label[data-status="help"] .city-label-status { color: #ff6a55; font-weight: 700; }
 .city-label[data-status="acknowledged"] .city-label-status { color: #9ec5ff; }
 .city-label[data-selected="true"] { border-color: #ece6d9; background: rgba(38, 44, 82, 0.92); }
+.journey-label {
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(18, 22, 44, 0.92);
+  border: 1px solid rgba(236, 230, 217, 0.25);
+  color: #ece6d9;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.journey-crumb { margin: 0 0 0.55rem; color: #b3aec6; font-size: 0.85rem; line-height: 1.45; }
 .city-fallback { display: grid; place-items: center; height: 100%; padding: 2rem; text-align: center; color: #b3aec6; }
 
 /* Landing: a scroll-driven film over the 3D city */

@@ -13,6 +13,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
+import { CITY_HALL_ID, type JourneyHop } from "../journey";
 
 export type HouseholdStatus = "unknown" | "ok" | "help" | "acknowledged" | "silent";
 export type FocusTarget = "overview" | "hill" | "cityhall" | "crescent" | string;
@@ -110,11 +111,16 @@ export class PorchlightCity {
   private readonly streetLightX: number[] = [];
   private readonly mastLight: THREE.Mesh;
   private readonly mastTop = new THREE.Vector3();
+  /** Landmark at City Hall (building centre) for journey hops. */
+  private readonly cityHallPos = new THREE.Vector3();
   private readonly houses = new Map<string, HouseSlot>();
   private readonly hitboxes: THREE.Mesh[] = [];
   private readonly travellers: Traveller[] = [];
   private readonly buddyArcs: THREE.Line[] = [];
   private noticeRing?: { mesh: THREE.Mesh; start: number; duration: number };
+  private readonly journeyObjects: THREE.Object3D[] = [];
+  private readonly journeyLabels: { obj: CSS2DObject; clearAt: number }[] = [];
+  private journeyTimers: ReturnType<typeof setTimeout>[] = [];
   private rain?: THREE.LineSegments;
   /** Signs and clock faces that run on grid power and go dark with the storm. */
   private readonly gridLights: { mat: THREE.MeshBasicMaterial; base: THREE.Color; x: number }[] = [];
@@ -403,6 +409,7 @@ export class PorchlightCity {
     mast.position.set(cx + 10, 22 + 17, cz);
     this.scene.add(mast);
     this.mastTop.set(cx + 10, 22 + 35, cz);
+    this.cityHallPos.set(cx, 14, cz);
   }
 
   private buildResidential(rand: () => number): { x: number; z: number; facing: number }[] {
@@ -697,6 +704,113 @@ export class PorchlightCity {
     }
   }
 
+  /**
+   * Play how a call reached City Hall: a glowing pulse along each hop in order.
+   * Under prefers-reduced-motion, draws every arc and label at once, static.
+   */
+  playJourney(hops: JourneyHop[]): void {
+    this.clearJourney();
+    if (!hops.length) return;
+    if (this.reducedMotion) {
+      this.drawStaticJourney(hops);
+      return;
+    }
+    this.runJourneyHop(hops, 0);
+  }
+
+  private journeyColor(kind: JourneyHop["kind"]): string {
+    if (kind === "Bluetooth") return "#ff6a55";
+    if (kind === "Neighbour to neighbour") return "#f2b35e";
+    return "#9ec5ff";
+  }
+
+  private posForJourney(id: string): THREE.Vector3 | null {
+    if (id === CITY_HALL_ID) return this.cityHallPos.clone();
+    const slot = this.houses.get(id);
+    return slot ? slot.position.clone() : null;
+  }
+
+  private curveForHop(from: THREE.Vector3, to: THREE.Vector3, toCity: boolean): THREE.QuadraticBezierCurve3 {
+    const lift = toCity ? 70 : 18 + from.distanceTo(to) * 0.25;
+    const mid = from.clone().lerp(to, 0.5).add(new THREE.Vector3(0, lift, 0));
+    return new THREE.QuadraticBezierCurve3(from.clone(), mid, to.clone());
+  }
+
+  private runJourneyHop(hops: JourneyHop[], index: number): void {
+    if (this.disposed || index >= hops.length) return;
+    const hop = hops[index]!;
+    const from = this.posForJourney(hop.fromId);
+    const to = this.posForJourney(hop.toId);
+    if (!from || !to) {
+      this.runJourneyHop(hops, index + 1);
+      return;
+    }
+    const color = this.journeyColor(hop.kind);
+    const midLabel = from.clone().lerp(to, 0.5).add(new THREE.Vector3(0, 16, 0));
+    this.spawnJourneyLabel(hop.kind, midLabel, 1500);
+    const curve = this.curveForHop(from, to, hop.kind === "To City Hall");
+    this.launch(curve, color, 800, () => {
+      if (hop.kind === "To City Hall") this.flashMast();
+      const continueNext = () => this.runJourneyHop(hops, index + 1);
+      if (hop.heldMs && hop.heldMs > 0) {
+        const secs = Math.max(1, Math.round(hop.heldMs / 1000));
+        this.spawnJourneyLabel(`Held ${secs} s during the outage`, to.clone().add(new THREE.Vector3(0, 14, 0)), 1500);
+        this.journeyTimers.push(setTimeout(continueNext, 1500));
+      } else {
+        continueNext();
+      }
+    });
+  }
+
+  private drawStaticJourney(hops: JourneyHop[]): void {
+    for (const hop of hops) {
+      const from = this.posForJourney(hop.fromId);
+      const to = this.posForJourney(hop.toId);
+      if (!from || !to) continue;
+      const color = this.journeyColor(hop.kind);
+      const curve = this.curveForHop(from, to, hop.kind === "To City Hall");
+      const points = curve.getPoints(32);
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, toneMapped: false }));
+      this.scene.add(line);
+      this.journeyObjects.push(line);
+      const midLabel = from.clone().lerp(to, 0.5).add(new THREE.Vector3(0, 16, 0));
+      this.spawnJourneyLabel(hop.kind, midLabel, 0);
+      if (hop.heldMs && hop.heldMs > 0) {
+        const secs = Math.max(1, Math.round(hop.heldMs / 1000));
+        this.spawnJourneyLabel(`Held ${secs} s during the outage`, to.clone().add(new THREE.Vector3(0, 14, 0)), 0);
+      }
+    }
+  }
+
+  private spawnJourneyLabel(text: string, pos: THREE.Vector3, ms: number): void {
+    const el = document.createElement("div");
+    el.className = "journey-label";
+    el.textContent = text;
+    const obj = new CSS2DObject(el);
+    obj.position.copy(pos);
+    this.scene.add(obj);
+    const clearAt = ms > 0 ? performance.now() + ms : Number.POSITIVE_INFINITY;
+    this.journeyLabels.push({ obj, clearAt });
+  }
+
+  private clearJourney(): void {
+    for (const t of this.journeyTimers) clearTimeout(t);
+    this.journeyTimers = [];
+    for (const o of this.journeyObjects) {
+      this.scene.remove(o);
+      const mesh = o as THREE.Mesh | THREE.Line;
+      mesh.geometry?.dispose?.();
+      const mat = mesh.material as THREE.Material | undefined;
+      mat?.dispose?.();
+    }
+    this.journeyObjects.length = 0;
+    for (const { obj } of this.journeyLabels) {
+      this.scene.remove(obj);
+    }
+    this.journeyLabels.length = 0;
+  }
+
   /** A message hopping between two households' nodes. */
   pulse(fromId: string, toId: string, color: THREE.ColorRepresentation = COLORS.porch, onArrive?: () => void): void {
     const a = this.houses.get(fromId);
@@ -929,6 +1043,14 @@ export class PorchlightCity {
       }
     }
 
+    for (let i = this.journeyLabels.length - 1; i >= 0; i -= 1) {
+      const entry = this.journeyLabels[i]!;
+      if (now >= entry.clearAt) {
+        this.scene.remove(entry.obj);
+        this.journeyLabels.splice(i, 1);
+      }
+    }
+
     if (this.cameraTween) {
       const tw = this.cameraTween;
       const k = Math.min(1, (now - tw.start) / tw.ms);
@@ -965,6 +1087,7 @@ export class PorchlightCity {
 
   dispose(): void {
     this.disposed = true;
+    this.clearJourney();
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibility);

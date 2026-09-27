@@ -7,7 +7,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const Body = z.object({
-  node: z.object({ id: z.string().regex(/^[0-9a-f]{16}$/), name: z.string().regex(/^[a-z0-9-]{2,32}$/) }),
+  node: z.object({
+    id: z.string().regex(/^[0-9a-f]{16}$/),
+    name: z.string().regex(/^[a-z0-9-]{2,32}$/),
+    /** Household this node sits in (Porch Circles / journey map). */
+    household: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/).optional(),
+  }),
   events: z.array(z.unknown()).max(250),
   /** City notice ids this node already holds (proof of delivery). */
   heldNotices: z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(200).optional(),

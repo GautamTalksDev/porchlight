@@ -58,6 +58,8 @@ export function useCopilot(opts: {
   noticesApiRef: MutableRefObject<NoticesApi | null>;
   onSelect: (householdId: string | null) => void;
   onFocus: (target: string) => void;
+  /** Replay how a call reached City Hall on the 3D map. */
+  onPlayJourney: (householdId: string) => void;
   onStartCheckIn: (householdId: string, incidentKey: string | null) => void;
   onToolUsed: () => void;
 }) {
@@ -241,7 +243,13 @@ export function useCopilot(opts: {
             if (!hit) return tool(`Show ${p?.address ?? "address"}`, UNKNOWN);
             optsRef.current.onSelect(hit.id);
             optsRef.current.onFocus(hit.id);
-            return tool(`Show ${hit.label}`, `Looking at ${hit.label}.`);
+            const live = optsRef.current.liveRef.current;
+            const hasCall = live.snap?.incidents.some((i) => i.household === hit.id && i.status !== "resolved");
+            if (hasCall) optsRef.current.onPlayJourney(hit.id);
+            return tool(
+              `Show ${hit.label}`,
+              hasCall ? `Looking at ${hit.label} and replaying how the call reached us.` : `Looking at ${hit.label}.`,
+            );
           },
           start_check_in: async (p: { address?: string }) => {
             const hit = find(p?.address);
