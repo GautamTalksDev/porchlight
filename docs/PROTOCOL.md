@@ -104,7 +104,7 @@ A `reply` event is how a neighbour answers a call on the mesh without the city. 
 
 ### City notices
 
-A `notice` event is a bilingual broadcast from the city to every node on the street: English (1 to 280 characters), French (1 to 320), and a severity of `info` or `urgent`. The household field is `city-hall`. Only the city's signing identity may create notices. Each node pins the city's origin id (`cityId`) from its first successful ingest response (or from optional `CITY_ID`), persists it next to `identity.json`, and then rejects any notice whose `origin` is not that id, whether it arrived by downlink or gossip. That keeps a compromised neighbourhood node from faking a city alert. An `alive` kind is reserved for later signs of life; it carries no extra payload beyond the normal event fields.
+A `notice` event is a bilingual broadcast from the city to every node on the street: English (1 to 280 characters), French (1 to 320), and a severity of `info` or `urgent`. The household field is `city-hall`. Only the city's signing identity may create notices. Each node pins the city's origin id (`cityId`) from its first successful ingest response (or from optional `CITY_ID`), persists it next to `identity.json`, and then rejects any notice whose `origin` is not that id, whether it arrived by downlink or gossip. That keeps a compromised neighbourhood node from faking a city alert. An `alive` event carries a required `signal` of `motion`, `presence`, `lights_on` or `lights_off` (from beacon kinds 5 to 8). Alive events never open incidents; they gossip and uplink like other events and feed silence and power tracking in the city.
 
 ### Verifying an event
 

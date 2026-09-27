@@ -7,6 +7,8 @@ import type { CityMessage, CitySnapshot } from "@/lib/city";
 import type { PorchlightCity } from "@/lib/city/scene";
 import { isFall } from "@/lib/fall";
 import { formatJourneyBreadcrumb, journeyFromTrail, resolveNodeHouseholds, type JourneyHop } from "@/lib/journey";
+import { aliveTrailLabel } from "@porchlight/protocol";
+import { formatSignsOfLifeLine } from "@/lib/power";
 import type { TriageResult } from "@/lib/triage";
 import { Timeline } from "./Timeline";
 import { useCopilot } from "./useCopilot";
@@ -499,6 +501,7 @@ export default function OpsRoom({
       id: h.id,
       label: h.label,
       status: (silentIds.has(h.id) && !h.openIncident ? "silent" : h.status) as "unknown" | "ok" | "help" | "acknowledged" | "silent",
+      lights: (h.lightState === "on" || h.lightState === "off" ? h.lightState : undefined) as "on" | "off" | undefined,
     }));
   }, [snap]);
 
@@ -780,6 +783,7 @@ export default function OpsRoom({
                       {isFall(snap?.incidents.find((i) => i.key === r.incident)?.note) ? (
                         <span className="tag tag-fall">Possible fall</span>
                       ) : null}
+                      {r.powerOut ? <span className="tag tag-power">Power out</span> : null}
                       {r.needs.map((n) => (
                         <span key={n} className={`tag ${/power/.test(n) ? "tag-power" : ""}`}>{n}</span>
                       ))}
@@ -814,6 +818,7 @@ export default function OpsRoom({
                       <span className="call-name">{s.label}</span>
                       <span className="call-meta">Silent for {s.minutesSilent} min. Speaks {s.lang === "fr" ? "French" : "English"}.</span>
                       <span className="tags">
+                        {s.powerOut ? <span className="tag tag-power">Power out</span> : null}
                         {s.needs.map((n) => (
                           <span key={n} className={`tag ${/power/.test(n) ? "tag-power" : ""}`}>{n}</span>
                         ))}
@@ -865,9 +870,10 @@ export default function OpsRoom({
                   <span className="status-word" data-status={household.status}>{STATUS_TEXT[household.status]}</span>
                   {household.lastEventAt ? `, last heard ${ago(household.lastEventAt)}` : null}
                 </p>
-                {household.needs.length || (incident && isFall(incident.note)) ? (
+                {household.needs.length || household.powerOut || (incident && isFall(incident.note)) ? (
                   <div className="tags">
                     {incident && isFall(incident.note) ? <span className="tag tag-fall">Possible fall</span> : null}
+                    {household.powerOut ? <span className="tag tag-power">Power out</span> : null}
                     {household.needs.map((n) => (
                       <span key={n.id} className={`tag ${/power/.test(n.label) ? "tag-power" : ""}`}>{n.label}</span>
                     ))}
@@ -875,6 +881,11 @@ export default function OpsRoom({
                 ) : (
                   <p className="section-sub">No needs recorded.</p>
                 )}
+                {formatSignsOfLifeLine(household.signsOfLife ?? undefined, Date.now()) ? (
+                  <p className="section-sub">
+                    Signs of life: {formatSignsOfLifeLine(household.signsOfLife ?? undefined, Date.now())}
+                  </p>
+                ) : null}
                 {incident ? (
                   <p className="section-sub">
                     Heard by {incident.witnesses.length} {incident.witnesses.length === 1 ? "node" : "nodes"}, waiting {incident.waitMinutes} min.
@@ -977,6 +988,8 @@ export default function OpsRoom({
                           <strong>
                             {t.kind === "reply"
                               ? `Neighbour: ${t.note ?? "reply"}`
+                              : t.kind === "alive"
+                                ? aliveTrailLabel(t.signal)
                               : t.kind === "help" && isFall(t.note ?? undefined)
                                 ? "Possible fall"
                                 : KIND_TEXT[t.kind] ?? t.kind}

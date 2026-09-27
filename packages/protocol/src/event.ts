@@ -69,6 +69,48 @@ export const EventSource = z.strictObject({
   rssi: z.number().int().min(-127).max(20).optional(),
 });
 
+export const AliveSignal = z.enum(["motion", "presence", "lights_on", "lights_off"]);
+export type AliveSignal = z.infer<typeof AliveSignal>;
+
+/** Trust-trail wording for an alive event. */
+export function aliveTrailLabel(signal: AliveSignal | string | undefined | null): string {
+  switch (signal) {
+    case "motion":
+      return "Beacon: moved";
+    case "presence":
+      return "Beacon: someone seen";
+    case "lights_on":
+      return "Beacon: lights on";
+    case "lights_off":
+      return "Beacon: lights out";
+    default:
+      return "Beacon: sign of life";
+  }
+}
+
+/** Short street-card phrase for the latest alive signal (relative time for motion/presence). */
+export function formatAliveSignalPhrase(
+  signal: AliveSignal | string,
+  atMs: number,
+  nowMs: number,
+): string {
+  const sec = Math.max(0, Math.floor((nowMs - atMs) / 1000));
+  const ago =
+    sec < 60 ? `${sec} s ago` : sec < 3600 ? `${Math.floor(sec / 60)} min ago` : `${Math.floor(sec / 3600)} h ago`;
+  switch (signal) {
+    case "motion":
+      return `Moved ${ago}`;
+    case "presence":
+      return `Someone seen ${ago}`;
+    case "lights_on":
+      return "Lights on";
+    case "lights_off":
+      return "Lights out";
+    default:
+      return "Sign of life";
+  }
+}
+
 export const EventBody = z.strictObject({
   v: z.literal(PROTOCOL_VERSION),
   kind: EventKind,
@@ -83,6 +125,8 @@ export const EventBody = z.strictObject({
   reply: ReplyCode.optional(),
   /** City broadcast notice (Porchlight city notices). */
   notice: NoticePayload.optional(),
+  /** Beacon signs of life (moved, presence, lights). */
+  signal: AliveSignal.optional(),
   source: EventSource,
   lang: z.enum(["en", "fr"]).optional(),
   note: safeText.optional(),
@@ -100,6 +144,7 @@ export interface NewEventFields {
   actor?: string;
   reply?: ReplyCode;
   notice?: NoticePayload;
+  signal?: AliveSignal;
   source: z.infer<typeof EventSource>;
   lang?: "en" | "fr";
   note?: string;
@@ -125,9 +170,16 @@ function assertNoticeFields(fields: NewEventFields): void {
   NoticePayload.parse(fields.notice);
 }
 
+function assertAliveFields(fields: NewEventFields): void {
+  if (fields.kind !== "alive") return;
+  if (!fields.signal) throw new Error("alive events need a signal");
+  AliveSignal.parse(fields.signal);
+}
+
 export function createEvent(identity: NodeIdentity, clock: HybridClock, fields: NewEventFields): SignedEvent {
   assertReplyFields(fields);
   assertNoticeFields(fields);
+  assertAliveFields(fields);
   const body: EventBody = EventBody.parse({
     v: PROTOCOL_VERSION,
     origin: identity.id,
@@ -145,6 +197,9 @@ export function createEvent(identity: NodeIdentity, clock: HybridClock, fields: 
   }
   if (body.kind === "notice") {
     if (!body.notice) throw new Error("notice events need a notice payload");
+  }
+  if (body.kind === "alive") {
+    if (!body.signal) throw new Error("alive events need a signal");
   }
   const canonical = canonicalize(body);
   const id = createHash("sha256").update(canonical).digest("hex");

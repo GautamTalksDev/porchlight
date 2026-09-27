@@ -17,6 +17,21 @@ describe("triage rules", () => {
   it("ranks every case exactly once", () => {
     assert.deepEqual(ruleRanking(cases).map((r) => r.ref).sort(), ["R1", "R2", "R3"]);
   });
+  it("adds power out boost and reason when lights are off at a dependent home", () => {
+    const withOut: TriageCase = {
+      ref: "R4",
+      status: "open",
+      waitMinutes: 5,
+      witnesses: 1,
+      needs: [{ id: "oxygen-concentrator", weight: 40 }],
+      lang: "en",
+      powerOut: true,
+    };
+    const without: TriageCase = { ...withOut, ref: "R5", powerOut: false };
+    const ranked = ruleRanking([without, withOut]);
+    assert.equal(ranked[0]!.ref, "R4");
+    assert.match(ranked[0]!.reason, /power out at a home with oxygen concentrator/);
+  });
 });
 
 describe("reconciling a model's answer", () => {

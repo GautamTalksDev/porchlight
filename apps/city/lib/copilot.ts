@@ -117,11 +117,14 @@ export interface OverviewQueueItem {
   needs: string[];
   /** True when Porch Circles has escalated to the city with no neighbour reply. */
   noNeighbour?: boolean;
+  /** Power-dependent home reported lights off during the emergency. */
+  powerOut?: boolean;
 }
 
 export interface OverviewSilentItem {
   label: string;
   minutesSilent: number;
+  powerOut?: boolean;
 }
 
 export interface OverviewInput {
@@ -133,6 +136,8 @@ export interface OverviewInput {
   nodesReporting: number;
   nodesTotal: number;
   latestNotice?: { en: string; reachedNodes: number; totalNodes: number } | null;
+  /** Power-dependent homes currently reporting lights out. */
+  powerOutHomes?: { label: string; need: string }[];
 }
 
 /** A short spoken summary for the coordinator, kept under 80 words. */
@@ -168,6 +173,17 @@ export function buildOverview(input: OverviewInput): string {
     } else {
       parts.push(
         `${input.silent.length} silent homes. Highest risk is ${s.label}, quiet for ${s.minutesSilent} minutes.`,
+      );
+    }
+  }
+
+  if (input.powerOutHomes?.length) {
+    const p = input.powerOutHomes[0]!;
+    if (input.powerOutHomes.length === 1) {
+      parts.push(`Power out at ${p.label}, a home with ${p.need}.`);
+    } else {
+      parts.push(
+        `Power out at ${input.powerOutHomes.length} power-dependent homes, including ${p.label}.`,
       );
     }
   }

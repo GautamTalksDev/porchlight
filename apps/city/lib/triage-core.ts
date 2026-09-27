@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import type { EscalationTier } from "@porchlight/protocol";
+import { powerOutTriageBoost } from "./power";
 
 export interface TriageCase {
   ref: string;
@@ -19,6 +20,8 @@ export interface TriageCase {
   tier?: EscalationTier | null;
   /** Short summary of neighbour replies for Gemini (already sanitised). */
   neighbourReplies?: string;
+  /** Power-dependent home reported lights off during the emergency. */
+  powerOut?: boolean;
 }
 
 export const Action = z.enum(["dispatch_neighbour", "voice_check_in", "monitor"]);
@@ -42,7 +45,11 @@ export function ruleScore(c: TriageCase): number {
   const unanswered = c.status === "open" ? 20 : 0;
   const fall = c.fall ? 25 : 0;
   const tierBoost = c.tier === "city" ? 15 : c.tier === "street" ? 5 : 0;
-  return needs + wait + corroboration + unanswered + fall + tierBoost;
+  const powerBoost = powerOutTriageBoost(
+    c.needs.map((n) => n.id),
+    c.powerOut === true,
+  ).boost;
+  return needs + wait + corroboration + unanswered + fall + tierBoost + powerBoost;
 }
 
 export function ruleRanking(cases: TriageCase[]): RankedItem[] {
@@ -51,18 +58,23 @@ export function ruleRanking(cases: TriageCase[]): RankedItem[] {
     .map((c) => {
       const s = ruleScore(c);
       const powerDependent = c.needs.some((n) => n.weight >= 40);
+      const powerBoost = powerOutTriageBoost(
+        c.needs.map((n) => n.id),
+        c.powerOut === true,
+      );
       const priority = s >= 70 ? 1 : s >= 50 ? 2 : s >= 35 ? 3 : s >= 20 ? 4 : 5;
       const parts: string[] = [];
       if (c.tier === "city") parts.push(`no neighbour has answered in ${c.waitMinutes} min`);
       if (c.fall) parts.push("possible fall, no button pressed");
-      if (powerDependent) parts.push("depends on power for medical equipment");
+      if (powerBoost.reason) parts.push(powerBoost.reason);
+      else if (powerDependent) parts.push("depends on power for medical equipment");
       if (c.status === "open" && c.tier !== "city") parts.push("no neighbour has responded");
       if (c.tier !== "city") parts.push(`waiting ${c.waitMinutes} min`);
       return {
         ref: c.ref,
         priority,
         reason: parts.join(", "),
-        action: powerDependent || c.status === "open" ? "dispatch_neighbour" : "voice_check_in",
+        action: powerDependent || c.powerOut || c.status === "open" ? "dispatch_neighbour" : "voice_check_in",
         script_en: "Hello, this is Porchlight calling for the city. We received your call for help. Are you safe right now?",
         script_fr: "Bonjour, ici Porchlight pour la Ville. Nous avons reçu votre appel à l'aide. Êtes-vous en sécurité en ce moment?",
       } satisfies RankedItem;

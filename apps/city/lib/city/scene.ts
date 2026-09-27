@@ -79,11 +79,18 @@ interface HouseSlot {
   position: THREE.Vector3;
   door: THREE.Vector3;
   porch: THREE.Mesh;
+  /** Front windows that fade with lights_on / lights_off. */
+  windows: THREE.Mesh[];
   beam: THREE.Mesh;
   ring: THREE.Mesh;
   label?: CSS2DObject;
   status: HouseholdStatus;
   node: boolean;
+  /** Beacon-reported light state; null means no report yet. */
+  lights: "on" | "off" | null;
+  /** 0 = dark, 1 = warm glow. Animated toward lights. */
+  lightGlow: number;
+  lightTarget: number;
 }
 
 interface Traveller {
@@ -508,7 +515,12 @@ export class PorchlightCity {
       roof.rotation.y = Math.PI / 4;
       roof.position.y = 5.5 + 1.9;
       roof.scale.set(1, 1, 0.9);
-      group.add(body, roof);
+      const winMat = new THREE.MeshBasicMaterial({ color: COLORS.unlit.clone(), toneMapped: false });
+      const winL = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.6), winMat);
+      winL.position.set(-1.6, 3.2, 3.52);
+      const winR = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.6), winMat.clone());
+      winR.position.set(1.6, 3.2, 3.52);
+      group.add(body, roof, winL, winR);
       this.scene.add(group);
 
       group.updateMatrixWorld(true);
@@ -532,7 +544,20 @@ export class PorchlightCity {
       this.hitboxes.push(hit);
       this.scene.add(porch, beam, ring, hit);
 
-      const slot: HouseSlot = { id: h.id, position: new THREE.Vector3(x, 6, z), door, porch, beam, ring, status: "unknown", node: nodeHouseIds.includes(h.id) };
+      const slot: HouseSlot = {
+        id: h.id,
+        position: new THREE.Vector3(x, 6, z),
+        door,
+        porch,
+        windows: [winL, winR],
+        beam,
+        ring,
+        status: "unknown",
+        node: nodeHouseIds.includes(h.id),
+        lights: null,
+        lightGlow: 0.55,
+        lightTarget: 0.55,
+      };
       if (this.opts.labels) {
         const el = document.createElement("div");
         el.className = "city-label";
@@ -554,6 +579,7 @@ export class PorchlightCity {
       }
       this.houses.set(h.id, slot);
       this.applyStatus(slot);
+      this.applyWindowGlow(slot);
     });
   }
 
@@ -564,6 +590,28 @@ export class PorchlightCity {
     if (!slot || slot.status === status) return;
     slot.status = status;
     this.applyStatus(slot);
+  }
+
+  /** Beacon lights_on / lights_off: warm windows fade in or out (instant under reduced motion). */
+  setHouseholdLights(id: string, lights: "on" | "off" | null): void {
+    const slot = this.houses.get(id);
+    if (!slot) return;
+    if (slot.lights === lights) return;
+    slot.lights = lights;
+    slot.lightTarget = lights === "off" ? 0.08 : lights === "on" ? 1 : slot.node ? 0.7 : 0.55;
+    if (this.reducedMotion) {
+      slot.lightGlow = slot.lightTarget;
+      this.applyWindowGlow(slot);
+    }
+  }
+
+  private applyWindowGlow(slot: HouseSlot): void {
+    const warm = COLORS.windowWarm[0]!;
+    const dark = COLORS.unlit;
+    const c = warm.clone().lerp(dark, 1 - slot.lightGlow);
+    for (const w of slot.windows) {
+      (w.material as THREE.MeshBasicMaterial).color.copy(c).multiplyScalar(0.7 + 1.4 * slot.lightGlow);
+    }
   }
 
   private applyStatus(slot: HouseSlot): void {
@@ -984,7 +1032,16 @@ export class PorchlightCity {
     else mastMat.color.copy(COLORS.signal).multiplyScalar(Math.floor(now / 700) % 2 ? 2 : 0.2);
 
     // Help beams breathe; silent rings pulse pale blue; other rings stay still.
+    // Porch windows ease toward lights_on / lights_off.
     for (const slot of this.houses.values()) {
+      if (Math.abs(slot.lightGlow - slot.lightTarget) > 0.002) {
+        const speed = this.reducedMotion ? 1 : 1.8 * dt;
+        slot.lightGlow =
+          slot.lightGlow < slot.lightTarget
+            ? Math.min(slot.lightTarget, slot.lightGlow + speed)
+            : Math.max(slot.lightTarget, slot.lightGlow - speed);
+        this.applyWindowGlow(slot);
+      }
       if (slot.status === "help") {
         const k = this.reducedMotion ? 1 : 0.6 + 0.4 * Math.sin(now / 260);
         (slot.porch.material as THREE.MeshBasicMaterial).color.copy(COLORS.signal).multiplyScalar(0.8 + 1.8 * k);

@@ -14,6 +14,7 @@ import {
   decodeHlc,
   encodeFrame,
   escalationTier,
+  formatAliveSignalPhrase,
   hexToBytes,
   isStreetHousehold,
   project,
@@ -52,7 +53,7 @@ export interface BeaconReport {
 }
 
 export type BeaconOutcome =
-  | { ok: true; eventId: string; kind: "help" | "ok" | "test"; incident: string; household: string; corroborated?: boolean }
+  | { ok: true; eventId: string; kind: "help" | "ok" | "test" | "alive"; incident: string; household: string; corroborated?: boolean }
   | { ok: false; reason: string; status: number };
 
 /**
@@ -242,10 +243,23 @@ export class NodeAgent {
     }
     if (verdict !== "accept") return fail(verdict, verdict === "duplicate" ? 200 : 429);
     state.lastResult = `accepted ${f.kind}`;
-    // Test and signs-of-life frames are fire-and-forget: accept, do not open an incident.
-    if (f.kind === "test" || f.kind === "moved" || f.kind === "lights_on" || f.kind === "lights_off" || f.kind === "presence") {
+    if (f.kind === "test") {
       this.changed();
       return { ok: true, eventId: "", kind: "test", incident: f.incident, household };
+    }
+    if (f.kind === "moved" || f.kind === "presence" || f.kind === "lights_on" || f.kind === "lights_off") {
+      const signal =
+        f.kind === "moved" ? ("motion" as const) : f.kind === "presence" ? ("presence" as const) : f.kind === "lights_on" ? ("lights_on" as const) : ("lights_off" as const);
+      const ev = createEvent(this.identity, this.clock, {
+        kind: "alive",
+        household,
+        signal,
+        source: { type: "beacon", beacon: report.beaconId, rssi: report.rssi },
+        lang: this.langFor(household),
+      });
+      this.store.add(ev);
+      this.changed();
+      return { ok: true, eventId: ev.id, kind: "alive", incident: f.incident, household };
     }
     const eventKind = f.kind === "fall" ? "help" : f.kind;
     const ev = createEvent(this.identity, this.clock, {
@@ -545,11 +559,22 @@ export class NodeAgent {
       .filter((h) => isStreetHousehold(h.household))
       .map((h) => {
       const info = this.config.households.households[h.household];
+      let signOfLife: string | null = null;
+      let latestAliveAt = -1;
+      for (const e of events) {
+        if (e.household !== h.household || e.kind !== "alive" || !e.signal) continue;
+        const at = decodeHlc(e.hlc).wall;
+        if (at > latestAliveAt) {
+          latestAliveAt = at;
+          signOfLife = formatAliveSignalPhrase(e.signal, at, now);
+        }
+      }
       return {
         ...h,
         label: label(h.household),
         lang: this.langFor(h.household),
         buddies: info?.buddies ?? [],
+        signOfLife,
       };
     });
     const notices = events

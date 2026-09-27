@@ -301,7 +301,7 @@ function renderStreet(households) {
             class: "house",
             type: "button",
             dataset: { status: h.status },
-            "aria-label": `${h.label}: ${STATUS_TEXT[h.status]}`,
+            "aria-label": `${h.label}: ${h.signOfLife || STATUS_TEXT[h.status]}`,
             onclick: () => openSheet(h),
           },
           el(
@@ -313,7 +313,7 @@ function renderStreet(households) {
             el("span", { class: "house-porch" }),
           ),
           el("span", { class: "house-label" }, h.label),
-          el("span", { class: "house-status" }, STATUS_TEXT[h.status]),
+          el("span", { class: "house-status" }, h.signOfLife || STATUS_TEXT[h.status]),
         ),
       ),
     ),

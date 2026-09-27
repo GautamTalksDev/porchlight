@@ -241,6 +241,36 @@ describe("three nodes and a city", () => {
       assert.match(r.reason, /not signed by the City/);
     }
   });
+
+  it("beacon signs of life become one alive event each with the right signal", async () => {
+    await new Promise((r) => setTimeout(r, 900));
+    const kinds = [
+      { kind: "moved" as const, signal: "motion", counter: 40 },
+      { kind: "presence" as const, signal: "presence", counter: 41 },
+      { kind: "lights_on" as const, signal: "lights_on", counter: 42 },
+      { kind: "lights_off" as const, signal: "lights_off", counter: 43 },
+    ];
+    for (const k of kinds) {
+      await new Promise((r) => setTimeout(r, 900));
+      const before = nodes[0]!.agent.store.all().filter((e) => e.kind === "alive" && e.signal === k.signal).length;
+      const frame = bytesToHex(encodeFrame("pl-b01", hexToBytes(KEY_HEX), k.kind, 0xabcd, k.counter));
+      const res = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -55 });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { kind: string; eventId: string };
+      assert.equal(body.kind, "alive");
+      assert.ok(body.eventId);
+      const again = await post(nodes[0]!, "/api/beacon", { beaconId: "pl-b01", frame, via: "ble", rssi: -55 });
+      assert.equal(again.status, 200);
+      const alive = nodes[0]!.agent.store.all().filter((e) => e.kind === "alive" && e.signal === k.signal);
+      assert.equal(alive.length, before + 1, `${k.kind} must produce exactly one alive event`);
+      assert.equal(alive[alive.length - 1]!.household, "hh-maple-12");
+      assert.equal(alive[alive.length - 1]!.signal, k.signal);
+    }
+    assert.equal(
+      nodes[0]!.agent.store.all().filter((e) => e.kind === "help" && (e.incident ?? "").startsWith("pl-b01:0000abcd:4")).length,
+      0,
+    );
+  });
 });
 
 describe("uplink with a city that omits cityEvents", () => {

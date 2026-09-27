@@ -391,11 +391,26 @@ describe("notice events", () => {
 });
 
 describe("alive events", () => {
-  it("creates and verifies an alive event with no extra payload", () => {
+  it("creates and verifies an alive event with a signal", () => {
     const me = generateIdentity();
     const clock = new HybridClock(me.id);
-    const ev = createEvent(me, clock, { kind: "alive", household: "hh-maple-12", source: { type: "console" } });
+    const ev = createEvent(me, clock, {
+      kind: "alive",
+      household: "hh-maple-12",
+      signal: "motion",
+      source: { type: "beacon", beacon: "pl-b01" },
+    });
     assert.equal(ev.kind, "alive");
+    assert.equal(ev.signal, "motion");
     assert.equal(verifyEvent(ev).ok, true);
+  });
+
+  it("rejects an alive event with no signal", () => {
+    const me = generateIdentity();
+    const clock = new HybridClock(me.id);
+    assert.throws(
+      () => createEvent(me, clock, { kind: "alive", household: "hh-maple-12", source: { type: "console" } }),
+      /signal/,
+    );
   });
 });

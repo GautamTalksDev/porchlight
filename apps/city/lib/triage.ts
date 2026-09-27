@@ -70,6 +70,7 @@ export interface TriageResult {
     waitMinutes: number;
     needs: string[];
     tier: EscalationTier | null;
+    powerOut?: boolean;
   })[];
 }
 
@@ -107,6 +108,7 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
       fall: isFall(inc.note),
       tier: inc.tier ?? null,
       neighbourReplies: replySummary || undefined,
+      powerOut: snap.households.find((x) => x.id === inc.household)?.powerOut === true,
     };
   });
 
@@ -128,6 +130,7 @@ export async function triage(snap: CitySnapshot): Promise<TriageResult> {
           waitMinutes: inc.waitMinutes,
           needs: (h?.needs ?? []).map((n) => NEED_LABELS[n]?.en ?? n),
           tier: inc.tier ?? null,
+          powerOut: snap.households.find((x) => x.id === inc.household)?.powerOut === true,
         };
       }),
   });

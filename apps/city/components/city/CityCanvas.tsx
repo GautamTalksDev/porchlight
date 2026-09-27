@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CityHousehold, HouseholdStatus, PorchlightCity } from "@/lib/city/scene";
 
 export interface CityCanvasProps {
-  households: (CityHousehold & { status?: HouseholdStatus })[];
+  households: (CityHousehold & { status?: HouseholdStatus; lights?: "on" | "off" })[];
   nodeHouseIds: string[];
   labels?: boolean | "all" | "active";
   autoRotate?: boolean;
@@ -36,7 +36,10 @@ export default function CityCanvas({ households, nodeHouseIds, labels, autoRotat
           onSelect: (id) => selectRef.current?.(id),
         });
         cityRef.current = city;
-        for (const h of households) if (h.status) city.setHouseholdStatus(h.id, h.status);
+        for (const h of households) {
+          if (h.status) city.setHouseholdStatus(h.id, h.status);
+          if (h.lights) city.setHouseholdLights(h.id, h.lights);
+        }
         onReady?.(city);
       } catch (err) {
         console.error("3D city unavailable", err);
@@ -55,7 +58,10 @@ export default function CityCanvas({ households, nodeHouseIds, labels, autoRotat
   useEffect(() => {
     const city = cityRef.current;
     if (!city) return;
-    for (const h of households) if (h.status) city.setHouseholdStatus(h.id, h.status);
+    for (const h of households) {
+      if (h.status) city.setHouseholdStatus(h.id, h.status);
+      city.setHouseholdLights(h.id, h.lights ?? null);
+    }
   }, [households]);
 
   if (failed) {

@@ -106,4 +106,19 @@ describe("buildOverview", () => {
     assert.match(text, /Warming centre at Heron Road/);
     assert.match(text, /Reached 3 of 3 nodes/);
   });
+
+  it("mentions power-dependent homes with the power out", () => {
+    const text = buildOverview({
+      counts: { help: 1, acknowledged: 0, ok: 0, unknown: 0 },
+      queue: [{ label: "12 Maple Crescent", needs: ["oxygen concentrator"], powerOut: true }],
+      silent: [],
+      outage: false,
+      emergencySince: 1,
+      nodesReporting: 3,
+      nodesTotal: 3,
+      powerOutHomes: [{ label: "12 Maple Crescent", need: "oxygen concentrator" }],
+    });
+    assert.match(text, /Power out at 12 Maple Crescent/);
+    assert.match(text, /oxygen concentrator/);
+  });
 });

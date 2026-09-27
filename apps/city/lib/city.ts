@@ -20,7 +20,8 @@ import { classifyIngestItem } from "./ingest-verify";
 import { resolveNodeHouseholds, journeyFromTrail, type JourneyHop } from "./journey";
 import { recordNoticeConfirmations } from "./notice-delivery";
 import { NEED_LABELS, registry } from "./registry";
-import { computeSilent } from "./silence";
+import { computePowerOut, latestLightState, signsOfLifeFromEvents, type LightState, type SignTimestamps } from "./power";
+import { computeSilent, lastHeardAtForSilence } from "./silence";
 import { shouldSkipAnalytics } from "./analytics-backoff";
 import { withoutBroadcastHousehold } from "./street-households";
 
@@ -424,6 +425,7 @@ export async function snapshot() {
       note: string | null;
       heldMs: number;
       eventId: string;
+      signal: string | null;
     }[]
   > = {};
   for (const e of events) {
@@ -446,13 +448,31 @@ export async function snapshot() {
       beacon: e.source.beacon ?? null,
       note,
       heldMs: Math.max(0, received - decodeHlc(e.hlc).wall),
+      signal: e.signal ?? null,
     });
   }
   for (const k of Object.keys(trail)) trail[k] = trail[k]!.sort((a, b) => b.at - a.at).slice(0, 8);
 
   const thresholdMinutes = Math.max(1, Number(process.env.SILENCE_MINUTES) || 30);
-  const lastHeardAt: Record<string, number | null> = {};
-  for (const h of households) lastHeardAt[h.id] = h.lastEventAt;
+  const eventTimes = events
+    .filter((e) => isStreetHousehold(e.household))
+    .map((e) => ({
+      household: e.household,
+      kind: e.kind,
+      signal: e.signal,
+      at: decodeHlc(e.hlc).wall,
+    }));
+  const lastHeardAt = lastHeardAtForSilence(eventTimes);
+  const lightState = latestLightState(eventTimes) as Record<string, LightState | undefined>;
+  const signsOfLife = signsOfLifeFromEvents(eventTimes) as Record<string, SignTimestamps>;
+  const powerOutIds = computePowerOut({
+    households: withoutBroadcastHousehold(
+      Object.entries(reg.households).map(([id, h]) => ({ id, needs: h.needs })),
+    ),
+    lightState,
+    emergencyActive: c.emergencySince != null,
+  });
+  const powerOutSet = new Set(powerOutIds);
   const silent = computeSilent({
     households: withoutBroadcastHousehold(
       Object.entries(reg.households).map(([id, h]) => ({ id, label: h.label, lang: h.lang, needs: h.needs })),
@@ -461,7 +481,14 @@ export async function snapshot() {
     emergencySince: c.emergencySince,
     now,
     thresholdMinutes,
+    powerOut: powerOutSet,
   });
+  const householdsWithLife = households.map((h) => ({
+    ...h,
+    lightState: (lightState[h.id] as LightState | undefined) ?? null,
+    powerOut: powerOutSet.has(h.id),
+    signsOfLife: signsOfLife[h.id] ?? null,
+  }));
 
   const totalNodes = Math.max(Object.keys(reg.nodes).length, 1);
   const notices = noticesFromEvents(events, cityId, c.noticeConfirmations, totalNodes);
@@ -477,9 +504,9 @@ export async function snapshot() {
   });
 
   const householdLabels: Record<string, string> = {};
-  for (const h of households) householdLabels[h.id] = h.label;
+  for (const h of householdsWithLife) householdLabels[h.id] = h.label;
   const journeys: Record<string, JourneyHop[]> = {};
-  for (const h of households) {
+  for (const h of householdsWithLife) {
     const entries = trail[h.id] ?? [];
     const open = incidents.some((i) => i.household === h.id && i.status !== "resolved");
     if (!entries.length && !open) continue;
@@ -503,7 +530,7 @@ export async function snapshot() {
     trail,
     storage: dbEnabled() ? "tiger-data" : "memory",
     counts: { events: events.length, open: incidents.filter((i) => i.status !== "resolved").length },
-    households,
+    households: householdsWithLife,
     incidents,
     nodes: [...c.nodes.values()].map((n) => ({
       ...n,

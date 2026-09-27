@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { buildOverview, resolveHousehold } from "@/lib/copilot";
 import type { CitySnapshot } from "@/lib/city";
+import { formatSignsOfLifeLine } from "@/lib/power";
 import type { TriageResult } from "@/lib/triage";
 import type { NoticesApi } from "./NoticesPanel";
 
@@ -146,10 +147,12 @@ export function useCopilot(opts: {
                 label: i.label,
                 needs: i.needs,
                 noNeighbour: i.tier === "city",
+                powerOut: i.powerOut,
               })),
               silent: (live.snap?.silent ?? []).map((h) => ({
                 label: h.label,
                 minutesSilent: h.minutesSilent,
+                powerOut: h.powerOut,
               })),
               outage: Boolean(live.snap?.outage),
               emergencySince: live.snap?.emergencySince ?? null,
@@ -158,6 +161,15 @@ export function useCopilot(opts: {
               latestNotice: latest
                 ? { en: latest.en, reachedNodes: latest.reachedNodes, totalNodes: latest.totalNodes }
                 : null,
+              powerOutHomes: (live.snap?.households ?? [])
+                .filter((h) => h.powerOut)
+                .map((h) => {
+                  const need =
+                    h.needs.find((n) => /oxygen|dialysis|insulin/i.test(n.label))?.label ??
+                    h.needs[0]?.label ??
+                    "a power-dependent need";
+                  return { label: h.label, need };
+                }),
             });
             return tool("Overview", text);
           },
@@ -180,6 +192,15 @@ export function useCopilot(opts: {
             let wait = "";
             if (open) wait = ` Waiting ${open.waitMinutes} minutes.`;
             else if (silent) wait = ` Silent for ${silent.minutesSilent} minutes.`;
+            let life = "";
+            if (h.signsOfLife) {
+              const line = formatSignsOfLifeLine(h.signsOfLife, Date.now());
+              if (line) life = ` Signs of life: ${line}`;
+            }
+            let power = "";
+            if (h.powerOut) power = " Power is out at this home.";
+            else if (h.lightState === "on") power = " Lights are on.";
+            else if (h.lightState === "off") power = " Lights are out.";
             let circles = "";
             if (open) {
               const tierWords: Record<string, string> = {
@@ -205,7 +226,7 @@ export function useCopilot(opts: {
                 ? ` Latest event signed by ${trail.by}, relayed by ${trail.via}.`
                 : ` Latest event signed by ${trail.by}.`;
             }
-            const reply = `${hit.label} is ${statusWords[h.status] ?? h.status}. Speaks ${lang}. Needs: ${needs}.${wait}${circles}${how}`;
+            const reply = `${hit.label} is ${statusWords[h.status] ?? h.status}. Speaks ${lang}. Needs: ${needs}.${wait}${life}${power}${circles}${how}`;
             return tool(`Look up ${hit.label}`, reply);
           },
           dispatch: async (p: { address?: string }) => {
