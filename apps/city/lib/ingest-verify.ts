@@ -19,6 +19,7 @@ export function classifyIngestItem(
   const id = String((item as { id?: unknown })?.id ?? "").slice(0, 64);
   if (alreadyHas(id)) return { status: "duplicate", id };
   const v = verifyEvent(item, verifyOpts);
-  if (!v.ok) return { status: "rejected", id, reason: v.reason };
-  return { status: "accepted", event: v.event };
+  if (v.ok === true) return { status: "accepted", event: v.event };
+  if (v.ok === "pending_city") return { status: "rejected", id, reason: "city not pinned yet" };
+  return { status: "rejected", id, reason: v.reason };
 }

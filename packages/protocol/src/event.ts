@@ -152,7 +152,11 @@ export function createEvent(identity: NodeIdentity, clock: HybridClock, fields: 
   return { ...body, id, sig };
 }
 
-export type VerifyResult = { ok: true; event: SignedEvent } | { ok: false; reason: string };
+export type VerifyResult =
+  | { ok: true; event: SignedEvent }
+  | { ok: false; reason: string }
+  /** Signature is valid, but the City origin is not pinned yet, so hold for later. */
+  | { ok: "pending_city"; event: SignedEvent };
 
 export interface VerifyOptions {
   now?: number;
@@ -160,8 +164,8 @@ export interface VerifyOptions {
   /** If set, only events from these node ids are accepted (the neighbourhood roster). */
   allowedOrigins?: ReadonlySet<string>;
   /**
-   * When set, notice events must be signed by this city origin.
-   * When null or unset, notices are rejected (the City has not been pinned yet).
+   * When set to a city id, notice events must be signed by that origin.
+   * When null or unset, a well-formed signed notice is returned as pending_city instead of being dropped.
    */
   cityOrigin?: string | null;
   /** Called once when a notice is rejected for not being signed by the pinned City. */
@@ -189,17 +193,18 @@ export function verifyEvent(input: unknown, opts: VerifyOptions = {}): VerifyRes
       return { ok: false, reason: "reply text too long" };
     }
   }
-  if (ev.kind === "notice") {
-    if (!ev.notice) return { ok: false, reason: "notice without payload" };
-    if (!opts.cityOrigin || ev.origin !== opts.cityOrigin) {
-      opts.onNoticeRejected?.();
-      return { ok: false, reason: "notice not signed by the City" };
-    }
-  }
+  if (ev.kind === "notice" && !ev.notice) return { ok: false, reason: "notice without payload" };
   const { id, sig, ...body } = ev;
   const canonical = canonicalize(body);
   const expectedId = createHash("sha256").update(canonical).digest("hex");
   if (expectedId !== id) return { ok: false, reason: "id does not match content" };
   if (!verifyBytes(ev.pub, Buffer.from(canonical), sig)) return { ok: false, reason: "bad signature" };
+  if (ev.kind === "notice") {
+    if (opts.cityOrigin == null) return { ok: "pending_city", event: ev };
+    if (ev.origin !== opts.cityOrigin) {
+      opts.onNoticeRejected?.();
+      return { ok: false, reason: "notice not signed by the City" };
+    }
+  }
   return { ok: true, event: ev };
 }

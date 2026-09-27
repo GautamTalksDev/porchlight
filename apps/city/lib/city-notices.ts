@@ -93,3 +93,10 @@ export function storeSignedNotice(
   }
   return ev;
 }
+
+/** Map a publishNotice failure to the HTTP status the /api/notices route returns. */
+export function noticePublishHttpError(err: unknown): { status: number; reason: string } {
+  const reason = err instanceof Error ? err.message : "could not send notice";
+  const status = /could not store/i.test(reason) ? 500 : 400;
+  return { status, reason };
+}

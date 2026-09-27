@@ -10,6 +10,10 @@ export async function POST(req: Request) {
   if (denied) return denied;
   const parsed = z.object({ down: z.boolean() }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ ok: false, reason: "send { down: true | false }" }, { status: 400 });
-  await setOutage(parsed.data.down);
-  return Response.json({ ok: true, down: parsed.data.down });
+  try {
+    await setOutage(parsed.data.down);
+    return Response.json({ ok: true, down: parsed.data.down });
+  } catch (err) {
+    return Response.json({ ok: false, reason: (err as Error).message }, { status: 500 });
+  }
 }

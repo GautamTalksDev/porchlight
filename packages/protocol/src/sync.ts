@@ -49,7 +49,7 @@ export function handlePush(store: EventStore, req: PushRequest): PushResult {
   for (const ev of req.events) {
     const r = store.add(ev);
     if (r.added) added++;
-    else if (r.reason !== "duplicate") rejected++;
+    else if (r.reason !== "duplicate" && !r.pending) rejected++;
   }
   return { added, rejected };
 }
@@ -96,7 +96,7 @@ export async function syncWith(store: EventStore, selfId: string, peer: SyncTran
     for (const ev of events) {
       const r = store.add(ev);
       if (r.added) pulled++;
-      else if (r.reason !== "duplicate") rejected++;
+      else if (r.reason !== "duplicate" && !r.pending) rejected++;
     }
   }
   let pushed = 0;

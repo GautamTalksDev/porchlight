@@ -45,7 +45,9 @@ export class JsonlFileAdapter implements StoreAdapter {
   }
 }
 
-export type AddResult = { added: true } | { added: false; reason: string };
+export type AddResult =
+  | { added: true }
+  | { added: false; reason: string; pending?: boolean };
 
 /**
  * A grow-only set of signed events (a G-Set CRDT). Merging is set union, so every node that has
@@ -57,6 +59,8 @@ export class EventStore {
   private readonly bucketHash = new Map<string, string>();
   private readonly dirty = new Set<string>(BUCKETS);
   private readonly listeners = new Set<(e: SignedEvent) => void>();
+  /** Signed notices held until cityOrigin is pinned, then re-verified. */
+  private readonly pendingNotices = new Map<string, SignedEvent>();
   rejected = 0;
 
   constructor(
@@ -65,13 +69,19 @@ export class EventStore {
   ) {
     for (const raw of adapter.load()) {
       // Re-verify on load: a tampered file on disk is just another untrusted peer.
-      const r = verifyEvent(raw, { ...verifyOpts(), maxFutureSkewMs: Number.MAX_SAFE_INTEGER });
-      if (r.ok) this.insert(r.event, false);
+      const r = verifyEvent(raw, { ...this.verifyOpts(), maxFutureSkewMs: Number.MAX_SAFE_INTEGER });
+      if (r.ok === true) this.insert(r.event, false);
+      else if (r.ok === "pending_city") this.pendingNotices.set(r.event.id, r.event);
     }
   }
 
   get size(): number {
     return this.events.size;
+  }
+
+  /** Notices waiting for a pinned city id. */
+  get pendingNoticeCount(): number {
+    return this.pendingNotices.size;
   }
 
   has(id: string): boolean {
@@ -97,12 +107,36 @@ export class EventStore {
     const id = (input as { id?: unknown })?.id;
     if (typeof id === "string" && this.events.has(id)) return { added: false, reason: "duplicate" };
     const r = verifyEvent(input, this.verifyOpts());
-    if (!r.ok) {
+    if (r.ok === "pending_city") {
+      this.pendingNotices.set(r.event.id, r.event);
+      return { added: false, reason: "city not pinned yet", pending: true };
+    }
+    if (r.ok !== true) {
       this.rejected++;
       return { added: false, reason: r.reason };
     }
+    this.pendingNotices.delete(r.event.id);
     this.insert(r.event, true);
     return { added: true };
+  }
+
+  /**
+   * Re-check notices held while the City id was unknown. Call after pinning cityOrigin
+   * (verifyOpts must already return the new id).
+   */
+  retryPendingNotices(): { added: number; rejected: number } {
+    let added = 0;
+    let rejected = 0;
+    const held = [...this.pendingNotices.values()];
+    this.pendingNotices.clear();
+    for (const ev of held) {
+      const r = this.add(ev);
+      if (r.added) added += 1;
+      else if (r.pending) {
+        /* still unpinned */
+      } else if (r.reason !== "duplicate") rejected += 1;
+    }
+    return { added, rejected };
   }
 
   private insert(ev: SignedEvent, persist: boolean): void {

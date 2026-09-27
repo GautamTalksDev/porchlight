@@ -10,6 +10,10 @@ export async function POST(req: Request) {
   if (denied) return denied;
   const parsed = z.object({ active: z.boolean() }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ ok: false, reason: "send { active: true | false }" }, { status: 400 });
-  const since = await setEmergency(parsed.data.active);
-  return Response.json({ ok: true, active: parsed.data.active, emergencySince: since });
+  try {
+    const since = await setEmergency(parsed.data.active);
+    return Response.json({ ok: true, active: parsed.data.active, emergencySince: since });
+  } catch (err) {
+    return Response.json({ ok: false, reason: (err as Error).message }, { status: 500 });
+  }
 }

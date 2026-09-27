@@ -89,6 +89,8 @@ export class NodeAgent {
     opts: { persist?: boolean } = {},
   ) {
     const persist = opts.persist ?? true;
+    // Pin the City id before replaying the event log so genuine notices are not rejected on startup.
+    this.cityOrigin = config.cityId ?? this.loadPinnedCityId();
     this.store = new EventStore(
       persist ? new JsonlFileAdapter(join(config.dataDir, "events.jsonl")) : new MemoryAdapter(),
       () => ({
@@ -105,7 +107,6 @@ export class NodeAgent {
     for (const [beaconId, b] of Object.entries(config.households.beacons)) {
       this.beacons.set(beaconId, { beaconId, household: b.household });
     }
-    this.cityOrigin = config.cityId ?? this.loadPinnedCityId();
     if (persist) this.loadUplinked();
     // Keep the HLC ahead of everything we have seen, and seed the replay guard from history.
     for (const ev of this.store.all()) this.observe(ev);
@@ -410,7 +411,7 @@ export class NodeAgent {
         cityId?: unknown;
       };
       if (typeof body.cityId === "string" && /^[0-9a-f]{16}$/.test(body.cityId)) {
-        this.pinCityId(body.cityId);
+        this.acceptCityId(body.cityId);
       }
       for (const id of [...(body.accepted ?? []), ...(body.duplicates ?? [])]) this.uplinked.add(id);
       // Downlink must never fail the delivery: missing or malformed cityEvents are an empty list,
@@ -476,6 +477,22 @@ export class NodeAgent {
     } catch {
       /* non-fatal: in-memory pin still works until restart */
     }
+    const { added, rejected } = this.store.retryPendingNotices();
+    if (added || rejected) {
+      console.info(`[node] pinned City ${cityId.slice(0, 6)}; accepted ${added} held notice(s), rejected ${rejected}`);
+    }
+    if (added) this.changed();
+  }
+
+  /** Record the City signing id (from uplink). Re-checks any notices held while it was unknown. */
+  acceptCityId(cityId: string): void {
+    if (!/^[0-9a-f]{16}$/.test(cityId)) return;
+    this.pinCityId(cityId);
+  }
+
+  /** Test helper: the pinned City origin, if any. */
+  pinnedCityId(): string | null {
+    return this.cityOrigin;
   }
 
   private loadUplinked(): void {

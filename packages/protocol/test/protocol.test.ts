@@ -353,8 +353,27 @@ describe("notice events", () => {
     let logged = 0;
     const v = verifyEvent(ev, { cityOrigin: city.id, onNoticeRejected: () => (logged += 1) });
     assert.equal(v.ok, false);
-    if (!v.ok) assert.match(v.reason, /not signed by the City/);
+    if (v.ok === false) assert.match(v.reason, /not signed by the City/);
     assert.equal(logged, 1);
+  });
+
+  it("holds a signed notice as pending when the city id is not pinned yet", () => {
+    const city = generateIdentity();
+    const clock = new HybridClock(city.id);
+    const ev = createEvent(city, clock, {
+      kind: "notice",
+      household: "city-hall",
+      notice: { en: "Centre open.", fr: "Centre ouvert.", severity: "info" },
+      source: { type: "console" },
+    });
+    const v = verifyEvent(ev, { cityOrigin: null });
+    assert.equal(v.ok, "pending_city");
+    if (v.ok === "pending_city") assert.equal(v.event.id, ev.id);
+    const store = new EventStore(undefined, () => ({ cityOrigin: null }));
+    const add = store.add(ev);
+    assert.equal(add.added, false);
+    assert.equal(add.pending, true);
+    assert.equal(store.pendingNoticeCount, 1);
   });
 });
 

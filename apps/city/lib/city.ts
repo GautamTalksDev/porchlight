@@ -183,18 +183,29 @@ export async function ingest(
 
 export async function setOutage(down: boolean): Promise<void> {
   const c = city();
+  if (dbEnabled()) {
+    try {
+      await setSetting("outage", down);
+    } catch (err) {
+      throw new Error(`could not save outage setting: ${(err as Error).message}`);
+    }
+  }
   c.outage = down;
-  if (dbEnabled()) await setSetting("outage", down).catch((e) => console.error("[city] outage setting not saved", e.message));
   emit({ type: "outage", down });
 }
 
 /** Start or end the emergency clock used for proactive wellness checks. */
 export async function setEmergency(active: boolean): Promise<number | null> {
   const c = city();
-  c.emergencySince = active ? Date.now() : null;
+  const since = active ? Date.now() : null;
   if (dbEnabled()) {
-    await setSetting("emergencySince", c.emergencySince).catch((e) => console.error("[city] emergency setting not saved", e.message));
+    try {
+      await setSetting("emergencySince", since);
+    } catch (err) {
+      throw new Error(`could not save emergency setting: ${(err as Error).message}`);
+    }
   }
+  c.emergencySince = since;
   emit({ type: "emergency", since: c.emergencySince });
   return c.emergencySince;
 }
@@ -278,7 +289,10 @@ export async function cityAction(kind: "ok" | "ack", household: string, opts: { 
   }
   if (dbEnabled()) await insertEvents(events, identity.id);
   for (const ev of events) {
-    c.store.add(ev);
+    const added = c.store.add(ev);
+    if (!added.added && added.reason !== "duplicate") {
+      throw new Error(`could not store ${ev.kind}: ${added.reason}`);
+    }
     c.receivedAt.set(ev.id, Date.now());
   }
   emit({ type: "action", kind, household });

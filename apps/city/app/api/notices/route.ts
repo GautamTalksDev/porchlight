@@ -2,6 +2,7 @@ import { z } from "zod";
 import { NoticeSeverity } from "@porchlight/protocol";
 import { denyUnlessCoordinator } from "@/lib/auth";
 import { publishNotice } from "@/lib/city";
+import { noticePublishHttpError } from "@/lib/city-notices";
 import { allow, clientKey } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
     const ev = await publishNotice(parsed.data);
     return Response.json({ ok: true, eventId: ev.id });
   } catch (err) {
-    return Response.json({ ok: false, reason: (err as Error).message }, { status: 400 });
+    const { status, reason } = noticePublishHttpError(err);
+    return Response.json({ ok: false, reason }, { status });
   }
 }

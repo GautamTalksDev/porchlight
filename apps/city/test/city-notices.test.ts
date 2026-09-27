@@ -4,6 +4,7 @@ import { EventStore, HybridClock, generateIdentity, isStreetHousehold } from "@p
 import {
   cityEventsDownlink,
   createCityEventStore,
+  noticePublishHttpError,
   noticesFromEvents,
   storeSignedNotice,
 } from "../lib/city-notices.ts";
@@ -66,6 +67,26 @@ describe("city notice broadcast", () => {
         }),
       /could not store notice/,
     );
+  });
+
+  it("returns 500 for /api/notices when the store rejects the event", () => {
+    const identity = generateIdentity();
+    const clock = new HybridClock(identity.id);
+    const bare = new EventStore();
+    let caught: unknown;
+    try {
+      storeSignedNotice(bare, identity, clock, {
+        en: "Shelter open.",
+        fr: "Refuge ouvert.",
+        severity: "info",
+      });
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught instanceof Error);
+    const http = noticePublishHttpError(caught);
+    assert.equal(http.status, 500);
+    assert.match(http.reason, /could not store notice/);
   });
 
   it("accepts a city-signed notice on ingest when cityOrigin is passed", () => {
