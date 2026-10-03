@@ -30,7 +30,7 @@
     "check": "npm run typecheck && npm test && npm run test:firmware && npm run sim:ci && npm run city:build"
   },
   "devDependencies": {
-    "@types/node": "22.20.4",
+    "@types/node": "26.6.3",
     "tsx": "4.23.15",
     "typescript": "5.9.3"
   }
